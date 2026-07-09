@@ -1,0 +1,105 @@
+## ---------------------------------------------------------------------------
+## Trademark Evidence Assistant — .gitignore
+## Keeps the repo limited to software, specs, docs, prompts, and test fixtures.
+## Raw business/evidence data and generated artifacts are never committed.
+## ---------------------------------------------------------------------------
+
+# --- Dependencies ------------------------------------------------------------
+node_modules/
+.pnp/
+.pnp.js
+
+# --- Build outputs ------------------------------------------------------------
+build/
+dist/
+out/
+*.tsbuildinfo
+
+# --- Logs ------------------------------------------------------------
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- Databases ------------------------------------------------------------
+*.sqlite
+*.sqlite3
+*.db
+
+# --- Generated reports / exports / app-generated data --------------------
+# Folders are kept in Git via .gitkeep; their generated contents are not.
+reports/*
+!reports/.gitkeep
+exports/*
+!exports/.gitkeep
+generated/*
+!generated/.gitkeep
+
+# --- Cache / temp folders ------------------------------------------------------------
+cache/
+tmp/
+temp/
+.cache/
+.temp/
+
+# --- AI analysis outputs ------------------------------------------------------------
+ai-outputs/
+*.analysis.json
+*.ai-summary.json
+
+# --- Thumbnails / previews ------------------------------------------------------------
+thumbnails/
+previews/
+*.thumb.*
+*.preview.*
+
+# --- Embeddings / vector indexes ------------------------------------------------------------
+*.index
+*.faiss
+*.embeddings.json
+vector-index/
+vector-store/
+
+# --- Environment files ------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# --- OS files ------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- IDE files ------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+
+# --- Python virtualenv files ------------------------------------------------------------
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# --- Large binary design files ------------------------------------------------------------
+*.psd
+*.xcf
+*.ai
+*.indd
+
+# --- Video files ------------------------------------------------------------
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+
+# --- Compressed archives ------------------------------------------------------------
+*.zip
+*.7z
+*.rar
+
+# --- Raw evidence directories ------------------------------------------------------------
+# Client evidence is workspace data, not source code — never committed.
+workspaces/*/evidence/
