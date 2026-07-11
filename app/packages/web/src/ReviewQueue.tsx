@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { EvidenceItemDetail, ReviewDecisionAction, ReviewProgress } from "@trademark-evidence-assistant/shared";
-import { fetchNextItem, fetchPreviousItem, fetchProgress, recordDecision } from "./api.js";
+import { fetchItem, fetchNextItem, fetchPreviousItem, fetchProgress, recordDecision } from "./api.js";
 import { PreviewPane } from "./PreviewPane.js";
 import { MetadataPanel } from "./MetadataPanel.js";
 import { DecisionBar } from "./DecisionBar.js";
 import { NotesEditor, type NotesEditorHandle } from "./NotesEditor.js";
 import { ProgressSummary } from "./ProgressSummary.js";
 import { QuestionsPanel } from "./QuestionsPanel.js";
+import { ConnectionsPanel } from "./ConnectionsPanel.js";
+import { UsefulnessPanel } from "./UsefulnessPanel.js";
 
 type QueueState =
   | { phase: "loading" }
@@ -177,6 +179,15 @@ export function ReviewQueue() {
         <QuestionsPanel
           item={state.item}
           onRoleChange={(updated) => setState({ phase: "reviewing", item: updated })}
+        />
+        <ConnectionsPanel
+          item={state.item}
+          onChanged={(updated) => setState({ phase: "reviewing", item: updated })}
+          refetchItem={() => fetchItem(state.item.id)}
+        />
+        <UsefulnessPanel
+          item={state.item}
+          onChanged={(updated) => setState({ phase: "reviewing", item: updated })}
         />
         <NotesEditor ref={notesRef} itemId={state.item.id} initialNotes={state.item.notes} />
       </div>

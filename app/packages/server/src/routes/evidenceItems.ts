@@ -4,10 +4,14 @@ import type Database from "better-sqlite3";
 import {
   FILE_ROLES,
   REVIEW_DECISION_ACTIONS,
+  type ConnectionType,
   type FileRole,
   type ReviewDecisionAction,
+  type UsefulnessBand,
 } from "@trademark-evidence-assistant/shared";
 import * as reviewService from "../services/reviewService.js";
+import { createConnection, removeConnection, ConnectionValidationError } from "../services/connectionService.js";
+import { setOverride, clearOverride, ScoringValidationError } from "../services/scoringService.js";
 import type { ResolvedWorkspace } from "../config/workspaceConfig.js";
 
 /**
@@ -152,6 +156,75 @@ export function createEvidenceItemsRouter(
       const message = err instanceof Error ? err.message : String(err);
       const status = message.includes("not found") ? 404 : 400;
       res.status(status).json({ error: message });
+    }
+  });
+
+  router.post("/evidence-items/:id/connections", (req, res) => {
+    const { targetPath, type, explanation, confidence } = req.body ?? {};
+    if (typeof targetPath !== "string" || !targetPath) {
+      res.status(400).json({ error: "Body field 'targetPath' must be a non-empty string" });
+      return;
+    }
+    try {
+      const connection = createConnection(db, workspaceId, req.params.id, targetPath, {
+        type: type as ConnectionType,
+        explanation,
+        confidence: confidence ?? null,
+      });
+      res.status(201).json(connection);
+    } catch (err) {
+      if (err instanceof ConnectionValidationError) {
+        res.status(400).json({ error: err.message });
+        return;
+      }
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  router.delete("/connections/:connectionId", (req, res) => {
+    const connectionId = Number(req.params.connectionId);
+    if (!Number.isInteger(connectionId)) {
+      res.status(400).json({ error: "connectionId must be an integer" });
+      return;
+    }
+    try {
+      removeConnection(db, workspaceId, connectionId);
+      res.status(204).end();
+    } catch (err) {
+      if (err instanceof ConnectionValidationError) {
+        res.status(404).json({ error: err.message });
+        return;
+      }
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  router.put("/evidence-items/:id/usefulness-override", (req, res) => {
+    const { score, band, note } = req.body ?? {};
+    try {
+      setOverride(db, workspaceId, req.params.id, score, band as UsefulnessBand, note);
+      const item = reviewService.getItemDetail(db, workspaceId, req.params.id);
+      res.status(200).json(item);
+    } catch (err) {
+      if (err instanceof ScoringValidationError) {
+        res.status(400).json({ error: err.message });
+        return;
+      }
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  router.delete("/evidence-items/:id/usefulness-override", (req, res) => {
+    try {
+      clearOverride(db, workspaceId, req.params.id);
+      const item = reviewService.getItemDetail(db, workspaceId, req.params.id);
+      res.status(200).json(item);
+    } catch (err) {
+      if (err instanceof ScoringValidationError) {
+        res.status(404).json({ error: err.message });
+        return;
+      }
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
   });
 

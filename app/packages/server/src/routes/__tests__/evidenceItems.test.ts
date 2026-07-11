@@ -164,4 +164,103 @@ describe("evidence items routes", () => {
       .send({ value: 12345 });
     expect(res.status).toBe(400);
   });
+
+  it("POST /api/evidence-items/:id/connections creates a connection by target path", async () => {
+    const app = buildApp();
+    const source = await request(app).get("/api/evidence-items/next");
+    const target = await request(app).get("/api/evidence-items/next").query({ after: source.body.id });
+
+    const res = await request(app).post(`/api/evidence-items/${source.body.id}/connections`).send({
+      targetPath: target.body.originalPath,
+      type: "related_to",
+      explanation: "These two files depict the same product.",
+      confidence: "medium",
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.sourceItemId).toBe(source.body.id);
+    expect(res.body.targetItemId).toBe(target.body.id);
+  });
+
+  it("POST /api/evidence-items/:id/connections rejects a missing targetPath", async () => {
+    const app = buildApp();
+    const next = await request(app).get("/api/evidence-items/next");
+    const res = await request(app)
+      .post(`/api/evidence-items/${next.body.id}/connections`)
+      .send({ type: "related_to", explanation: "x" });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /api/evidence-items/:id/connections rejects an unknown target path", async () => {
+    const app = buildApp();
+    const next = await request(app).get("/api/evidence-items/next");
+    const res = await request(app).post(`/api/evidence-items/${next.body.id}/connections`).send({
+      targetPath: "does_not_exist.jpg",
+      type: "related_to",
+      explanation: "x",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("DELETE /api/connections/:connectionId removes a connection", async () => {
+    const app = buildApp();
+    const source = await request(app).get("/api/evidence-items/next");
+    const target = await request(app).get("/api/evidence-items/next").query({ after: source.body.id });
+    const created = await request(app).post(`/api/evidence-items/${source.body.id}/connections`).send({
+      targetPath: target.body.originalPath,
+      type: "related_to",
+      explanation: "x",
+    });
+
+    const res = await request(app).delete(`/api/connections/${created.body.id}`);
+    expect(res.status).toBe(204);
+
+    const detail = await request(app).get(`/api/evidence-items/${source.body.id}`);
+    expect(detail.body.connections).toHaveLength(0);
+  });
+
+  it("DELETE /api/connections/:connectionId returns 404 for an unknown id", async () => {
+    const app = buildApp();
+    const res = await request(app).delete("/api/connections/999999");
+    expect(res.status).toBe(404);
+  });
+
+  it("GET /api/evidence-items/:id includes a computed usefulness score with no override", async () => {
+    const app = buildApp();
+    const next = await request(app).get("/api/evidence-items/next");
+    expect(next.body.usefulness.computed.band).toBeTruthy();
+    expect(next.body.usefulness.override).toBeNull();
+  });
+
+  it("PUT /api/evidence-items/:id/usefulness-override sets an override", async () => {
+    const app = buildApp();
+    const next = await request(app).get("/api/evidence-items/next");
+    const res = await request(app)
+      .put(`/api/evidence-items/${next.body.id}/usefulness-override`)
+      .send({ score: 90, band: "Strong", note: "Verified in person." });
+    expect(res.status).toBe(200);
+    expect(res.body.usefulness.override.score).toBe(90);
+    expect(res.body.usefulness.effective.score).toBe(90);
+  });
+
+  it("PUT /api/evidence-items/:id/usefulness-override rejects a missing note", async () => {
+    const app = buildApp();
+    const next = await request(app).get("/api/evidence-items/next");
+    const res = await request(app)
+      .put(`/api/evidence-items/${next.body.id}/usefulness-override`)
+      .send({ score: 90, band: "Strong", note: "" });
+    expect(res.status).toBe(400);
+  });
+
+  it("DELETE /api/evidence-items/:id/usefulness-override reverts to the computed score", async () => {
+    const app = buildApp();
+    const next = await request(app).get("/api/evidence-items/next");
+    await request(app)
+      .put(`/api/evidence-items/${next.body.id}/usefulness-override`)
+      .send({ score: 90, band: "Strong", note: "note" });
+
+    const res = await request(app).delete(`/api/evidence-items/${next.body.id}/usefulness-override`);
+    expect(res.status).toBe(200);
+    expect(res.body.usefulness.override).toBeNull();
+  });
 });

@@ -67,13 +67,30 @@ export interface EvidenceItem {
 
 /** A typed connection between two Evidence Items (spec 07). */
 export interface EvidenceConnection {
-  id: string;
+  id: number;
   sourceItemId: string;
   targetItemId: string;
   type: ConnectionType;
   explanation: string;
-  confidence: SuggestionConfidence;
+  confidence: SuggestionConfidence | null;
   createdBy: string;
+  createdAt: string;
+}
+
+/**
+ * One connection as rendered from a specific item's point of view — the
+ * "chain" spec 07 asks for (no graph UI in v1). `direction` tells the UI
+ * whether this item was the source or target of the underlying
+ * connection, so it can render "this supports →" vs "← supported by".
+ */
+export interface ConnectionSummary {
+  connectionId: number;
+  direction: "outgoing" | "incoming";
+  relatedItemId: string;
+  relatedOriginalPath: string;
+  type: ConnectionType;
+  explanation: string;
+  confidence: SuggestionConfidence | null;
   createdAt: string;
 }
 
@@ -108,6 +125,23 @@ export interface ScanSummary {
   itemsMissing: number;
   duplicateGroups: number;
   errorMessage: string | null;
+}
+
+/** Response body for POST /api/export. Mirrors packages/server's ExportService.ExportSummary. */
+export interface ExportSummary {
+  exportId: number;
+  status: "completed" | "failed";
+  exportPath: string;
+  itemsExported: number;
+  errorMessage: string | null;
+}
+
+/** Response body for POST /api/binder. Mirrors packages/server's BinderService.BinderSummary. */
+export interface BinderSummary {
+  binderGenerationId: number;
+  exportId: number;
+  itemCount: number;
+  outputPaths: { markdown: string; html: string; json: string; csv: string };
 }
 
 /** Another Evidence Item that shares this one's exact SHA-256 hash. */
@@ -164,6 +198,37 @@ export interface EvidenceItemDetail {
   duplicates: DuplicateMember[];
   fileRole: FileRole | null;
   answers: ReviewAnswer[];
+  connections: ConnectionSummary[];
+  usefulness: EvidenceUsefulness;
+}
+
+/** A trademark-usefulness score (spec 08) — organizational aid only, never a legal conclusion. */
+export interface UsefulnessResult {
+  score: number;
+  band: UsefulnessBand;
+  positiveFactors: string[];
+  missingElements: string[];
+}
+
+/** A user override of the computed score. Requires a note (spec 08) and is never silent. */
+export interface UsefulnessOverride {
+  score: number;
+  band: UsefulnessBand;
+  note: string;
+  overriddenAt: string;
+}
+
+/**
+ * Both the freshly-computed score and any override are always sent
+ * together — overriding never hides the computed value
+ * (docs/DESIGN_LANGUAGE.md "the application never hides ... why
+ * something scored highly"). `effective` is whichever one should be
+ * displayed as primary (override if present, else computed).
+ */
+export interface EvidenceUsefulness {
+  computed: UsefulnessResult;
+  override: UsefulnessOverride | null;
+  effective: UsefulnessResult;
 }
 
 /** Review Queue progress counts (docs/ARCHITECTURE_CONSTITUTION.md #3 "Review Progress"). */

@@ -3,6 +3,8 @@ import type { HealthResponse } from "@trademark-evidence-assistant/shared";
 import { fetchHealth, fetchProgress } from "./api.js";
 import { ScanPanel } from "./ScanPanel.js";
 import { ReviewQueue } from "./ReviewQueue.js";
+import { ExportPanel } from "./ExportPanel.js";
+import { BinderPanel } from "./BinderPanel.js";
 
 type View = "home" | "review";
 
@@ -63,6 +65,8 @@ export function App() {
             evidenceRootExists={health.workspace.evidenceRootExists}
             onScanComplete={refreshHasScannedItems}
           />
+          {hasScannedItems && <ExportPanel />}
+          {hasScannedItems && <BinderPanel />}
         </>
       )}
     </main>

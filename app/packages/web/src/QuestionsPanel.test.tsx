@@ -29,6 +29,8 @@ const baseItem: EvidenceItemDetail = {
   duplicates: [],
   fileRole: null,
   answers: [],
+  connections: [],
+  usefulness: { computed: { score: 0, band: "Undetermined", positiveFactors: [], missingElements: [] }, override: null, effective: { score: 0, band: "Undetermined", positiveFactors: [], missingElements: [] } },
 };
 
 describe("QuestionsPanel", () => {

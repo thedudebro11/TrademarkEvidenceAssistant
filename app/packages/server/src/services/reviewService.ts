@@ -11,6 +11,8 @@ import { FILE_ROLES, SUGGESTION_CONFIDENCES } from "@trademark-evidence-assistan
 import { computeProgress, pickNextUnreviewed, pickPrevious } from "../engines/reviewQueueEngine.js";
 import type { QueueItem, ReviewProgressCounts } from "../engines/reviewQueueEngine.js";
 import { resolveSafePath, PathTraversalError } from "../security/pathGuard.js";
+import { getConnectionsForItem } from "./connectionService.js";
+import { getUsefulness } from "./scoringService.js";
 
 interface EvidenceItemRow {
   id: string;
@@ -81,6 +83,19 @@ function mapRow(db: Database.Database, row: EvidenceItemRow): EvidenceItemDetail
     answered_at: string;
   }[];
 
+  const answers = answerRows.map(
+    (a): ReviewAnswer => ({
+      questionId: a.question_id,
+      value: a.value,
+      source: a.source,
+      confidence: a.confidence as SuggestionConfidence | null,
+      note: a.note,
+      answeredAt: a.answered_at,
+    }),
+  );
+  const connections = getConnectionsForItem(db, row.id);
+  const fileRole = row.file_role as FileRole | null;
+
   return {
     id: row.id,
     originalPath: row.original_path,
@@ -105,16 +120,17 @@ function mapRow(db: Database.Database, row: EvidenceItemRow): EvidenceItemDetail
       evidenceItemId: d.evidence_item_id,
       originalPath: d.original_path,
     })),
-    fileRole: row.file_role as FileRole | null,
-    answers: answerRows.map(
-      (a): ReviewAnswer => ({
-        questionId: a.question_id,
-        value: a.value,
-        source: a.source,
-        confidence: a.confidence as SuggestionConfidence | null,
-        note: a.note,
-        answeredAt: a.answered_at,
-      }),
+    fileRole,
+    answers,
+    connections,
+    usefulness: getUsefulness(
+      db,
+      row.id,
+      answers,
+      fileRole,
+      duplicateRows.length > 0,
+      Boolean(row.notes && row.notes.trim()),
+      connections.map((c) => c.type),
     ),
   };
 }

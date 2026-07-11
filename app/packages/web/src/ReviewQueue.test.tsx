@@ -29,6 +29,8 @@ const baseItem: EvidenceItemDetail = {
   duplicates: [],
   fileRole: null,
   answers: [],
+  connections: [],
+  usefulness: { computed: { score: 0, band: "Undetermined", positiveFactors: [], missingElements: [] }, override: null, effective: { score: 0, band: "Undetermined", positiveFactors: [], missingElements: [] } },
 };
 
 const zeroProgress: ReviewProgress = { total: 0, unreviewed: 0, reviewed: 0, needsFollowUp: 0, excluded: 0 };
