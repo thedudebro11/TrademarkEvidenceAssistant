@@ -1,7 +1,10 @@
 # Trademark Evidence Assistant
 
-Trademark Evidence Assistant is a focused review tool for helping determine
-which files are useful for supporting a trademark evidence package.
+Trademark Evidence Assistant is a focused local review tool for helping
+determine which files are useful for supporting a trademark evidence
+package. It reviews business files one at a time, helps fill in missing
+context, connects related evidence, and produces an organized evidence
+package and a factual binder.
 
 ## What this is
 
@@ -21,13 +24,28 @@ which files are useful for supporting a trademark evidence package.
   helps prepare and organize material for human and legal review — it does
   not make legal determinations itself.
 
+## Fixed decisions
+
+- Local browser app — no cloud, no collaboration.
+- React + TypeScript + Vite frontend.
+- Node + TypeScript + Express backend.
+- SQLite for application data.
+- Originals are read-only; approved evidence is copied, never moved.
+- No AI in v1.
+- One-item-at-a-time guided review is the primary workflow.
+- Tight scope; no platform-style expansion.
+
+See [`specs/`](specs/) for the full specification set and
+[`docs/PRODUCT_DECISIONS.md`](docs/PRODUCT_DECISIONS.md) for the complete
+list of confirmed decisions and non-goals.
+
 ## Repository structure
 
 ```
-app/          Application source code
-docs/         Project documentation (including evidence handling policy)
-specs/        Specifications and design documents
-prompts/      AI prompts used by the application
+app/          npm workspace: packages/server, packages/web, packages/shared
+docs/         Project documentation (product decisions, evidence handling policy, planning docs)
+specs/        Numbered specification documents (product vision through acceptance criteria)
+prompts/      Prompts used to drive AI-assisted implementation of this project
 scripts/      Utility / automation scripts
 tests/        Test suites and lightweight test fixtures
 workspaces/   Per-client working areas
@@ -42,8 +60,21 @@ Raw evidence is never committed to this repository. See
 [`docs/EVIDENCE_HANDLING_POLICY.md`](docs/EVIDENCE_HANDLING_POLICY.md) for
 the full policy on how evidence is stored and handled.
 
+## Getting started
+
+See [`docs/SETUP.md`](docs/SETUP.md) for local setup and run commands
+(Windows PowerShell is the canonical development environment).
+
 ## Status
 
-This repository currently contains only the project structure, `.gitignore`,
-evidence handling policy, and this README. The application itself has not
-been built yet.
+Phase 4 (Conditional Questions) is complete. The app can scan a
+workspace's evidence, then review it one file at a time: preview, known
+metadata, duplicate notices, a manually-assigned file role, role-driven
+guided questions with autosave, free-text notes, and Include / Maybe /
+Needs Follow-Up / Archive decisions with keyboard shortcuts — verified
+against the real Fatletic evidence (192 files, 1013 MB) with zero
+modification. There are still no evidence connections, scoring, export,
+or binder generation. See
+[`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) for phase
+status. No review functionality (scanning, preview, guided questions,
+scoring, export, binder) exists yet.

@@ -3,7 +3,7 @@
 ## Keeps the repo limited to software, specs, docs, prompts, and test fixtures.
 ## Raw business/evidence data and generated artifacts are never committed.
 ## ---------------------------------------------------------------------------
-
+/.claude
 # --- Dependencies ------------------------------------------------------------
 node_modules/
 .pnp/
@@ -103,3 +103,9 @@ __pycache__/
 # --- Raw evidence directories ------------------------------------------------------------
 # Client evidence is workspace data, not source code — never committed.
 workspaces/*/evidence/
+
+# --- Golden test workspace exception ------------------------------------------------------------
+# Small synthetic fixtures (spec 14 / Phase 0 decision 3) — tracked in
+# git despite matching the binary-design/video patterns above, since
+# they are not real evidence.
+!tests/fixtures/golden-workspace/*
