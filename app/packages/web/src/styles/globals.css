@@ -1,0 +1,94 @@
+/**
+ * Global base styles — resets, typography, background.
+ * docs/ui/UI_DESIGN_SYSTEM.md "Background" section.
+ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font: var(--text-body);
+  color: var(--text-primary);
+  background-color: #f7f8fc;
+  background-image:
+    radial-gradient(680px 480px at 88% -8%, rgba(225, 29, 46, 0.09), transparent 60%),
+    radial-gradient(720px 520px at -10% 108%, rgba(35, 100, 232, 0.1), transparent 60%);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+h4,
+p,
+dl,
+dd,
+dt {
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+a {
+  color: var(--blue-700);
+}
+
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Visible focus for every interactive element — never rely on color alone. */
+:focus-visible {
+  outline: 2px solid var(--blue-600);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --surface: rgba(255, 255, 255, 0.92);
+    --surface-subtle: rgba(255, 255, 255, 0.85);
+    --border-neutral: rgba(25, 61, 120, 0.28);
+  }
+}

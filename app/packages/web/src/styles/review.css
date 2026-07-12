@@ -1,0 +1,114 @@
+/* Review Studio layout (docs/ui/UI_INFORMATION_ARCHITECTURE.md Page 2). */
+
+.review-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 62fr) minmax(320px, 38fr);
+  gap: 22px;
+  align-items: start;
+  padding-bottom: 96px; /* keep content clear of the sticky decision dock */
+}
+
+.review-progress-strip {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 18px;
+  margin-bottom: 18px;
+}
+
+.review-progress-strip__bar {
+  flex: 1;
+}
+
+.preview-canvas {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 520px;
+}
+
+.preview-canvas__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-neutral);
+}
+
+.preview-canvas__filename {
+  font: 650 14px/1.3 var(--font-sans);
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.preview-canvas__body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px;
+  min-height: 420px;
+}
+
+.preview-canvas__body img,
+.preview-canvas__body video {
+  max-width: 100%;
+  max-height: 70vh;
+  border-radius: var(--radius-control);
+}
+
+.preview-canvas__body iframe {
+  width: 100%;
+  height: 70vh;
+  border: none;
+  border-radius: var(--radius-control);
+  background: white;
+}
+
+.review-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.decision-dock {
+  position: sticky;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  flex-wrap: wrap;
+}
+
+.decision-dock__primary {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.shortcuts-help {
+  padding: 14px 16px;
+}
+.shortcuts-help dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin-top: 8px;
+}
+.shortcuts-help kbd {
+  font: 650 12px/1 var(--font-mono);
+  background: var(--surface-strong);
+  border: 1px solid var(--border-neutral);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+@media (max-width: 1180px) {
+  .review-layout {
+    grid-template-columns: 1fr;
+  }
+}

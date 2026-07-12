@@ -77,6 +77,10 @@ describe("ReviewQueue", () => {
     await waitFor(() => {
       expect(screen.getByAltText("product_photo.jpg")).toBeTruthy();
     });
+
+    // Metadata lives in the Details accordion section, collapsed by
+    // default (progressive disclosure — Identify opens first).
+    fireEvent.click(screen.getByRole("button", { name: /Details/ }));
     expect(screen.getByText("60 × 40")).toBeTruthy();
   });
 
@@ -126,6 +130,8 @@ describe("ReviewQueue", () => {
     });
 
     render(<ReviewQueue />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Details/ }));
 
     await waitFor(() => {
       expect(screen.getByText(/exact byte-for-byte match/)).toBeTruthy();

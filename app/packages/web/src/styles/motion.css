@@ -1,0 +1,59 @@
+/**
+ * Shared motion utilities (docs/ui/UI_INTERACTION_AND_MOTION.md).
+ * Durations/easing come from tokens.css so prefers-reduced-motion
+ * collapses them to 0ms in one place.
+ */
+.motion-card-lift {
+  transition: transform var(--motion-micro) var(--ease-out), box-shadow var(--motion-micro) var(--ease-out);
+}
+.motion-card-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-floating);
+}
+
+.motion-press {
+  transition: transform var(--motion-micro) var(--ease-out);
+}
+.motion-press:active {
+  transform: scale(0.97);
+}
+
+.motion-fade-in {
+  animation: fadeIn var(--motion-standard) var(--ease-out);
+}
+
+.motion-crossfade {
+  animation: fadeIn var(--motion-standard) var(--ease-in-out);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.icon-spin {
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-card-lift,
+  .motion-press,
+  .motion-fade-in,
+  .motion-crossfade {
+    animation: none !important;
+    transition: none !important;
+  }
+  .motion-card-lift:hover {
+    transform: none;
+  }
+}

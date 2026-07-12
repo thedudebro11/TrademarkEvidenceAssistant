@@ -45,7 +45,7 @@ describe("ScanPanel", () => {
     await waitFor(() => {
       expect(screen.getByText(/8 files discovered/)).toBeTruthy();
     });
-    expect(screen.getByText("1")).toBeTruthy(); // duplicate group count
+    expect(screen.getByText(/1 duplicate group/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Rescan Evidence" })).toBeTruthy();
   });
 

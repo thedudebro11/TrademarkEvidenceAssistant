@@ -3,24 +3,21 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { App } from "./App.js";
 import type { HealthResponse } from "@trademark-evidence-assistant/shared";
 
-describe("App", () => {
+const HEALTH: HealthResponse = {
+  status: "ok",
+  workspace: {
+    name: "Fatletic",
+    evidenceRoot: "/repo/workspaces/Fatletic/evidence",
+    evidenceRootExists: true,
+  },
+  database: { connected: true },
+};
+
+describe("App shell", () => {
   beforeEach(() => {
-    const health: HealthResponse = {
-      status: "ok",
-      workspace: {
-        name: "Fatletic",
-        evidenceRoot: "/repo/workspaces/Fatletic/evidence",
-        evidenceRootExists: true,
-      },
-      database: { connected: true },
-    };
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => health,
-      }),
+      vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => HEALTH }),
     );
   });
 
@@ -29,18 +26,27 @@ describe("App", () => {
     cleanup();
   });
 
-  it("renders health status once the backend responds", async () => {
+  it("renders the primary navigation with all four required routes", () => {
     render(<App />);
+    expect(screen.getByRole("link", { name: /home/i })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /^review$/i })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /prepare package/i })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /settings/i })).toBeTruthy();
+  });
 
-    expect(screen.getByText("Trademark Evidence Assistant")).toBeTruthy();
-
+  it("shows the workspace name once health resolves", async () => {
+    render(<App />);
     await waitFor(() => {
       expect(screen.getByText("Fatletic")).toBeTruthy();
     });
-    expect(screen.getByText("ok")).toBeTruthy();
   });
 
-  it("shows an error message when the backend is unreachable", async () => {
+  it("defaults to the Home route", () => {
+    render(<App />);
+    expect(screen.getByRole("link", { name: /home/i }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("shows a visible, non-crashing error banner when the backend is unreachable", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
 
     render(<App />);
@@ -48,32 +54,18 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.getByRole("alert").textContent).toContain("network down");
     });
+    // The shell itself must still render — an unreachable backend is not a crash.
+    expect(screen.getByRole("link", { name: /home/i })).toBeTruthy();
   });
 
-  it("shows a Review Evidence button once evidence has been scanned", async () => {
-    const health: HealthResponse = {
-      status: "ok",
-      workspace: { name: "Fatletic", evidenceRoot: "/repo/evidence", evidenceRootExists: true },
-      database: { connected: true },
-    };
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockImplementation((url: string) => {
-        if (url.includes("/evidence-items/progress")) {
-          return Promise.resolve({
-            ok: true,
-            status: 200,
-            json: async () => ({ total: 8, unreviewed: 8, reviewed: 0, needsFollowUp: 0, excluded: 0 }),
-          });
-        }
-        return Promise.resolve({ ok: true, status: 200, json: async () => health });
-      }),
-    );
-
+  it("navigates between routes via the sidebar", async () => {
     render(<App />);
+    await waitFor(() => screen.getByText("Fatletic"));
+
+    screen.getByRole("link", { name: /settings/i }).click();
 
     await waitFor(() => {
-      expect(screen.getByText("Review Evidence")).toBeTruthy();
+      expect(screen.getByRole("link", { name: /settings/i }).getAttribute("aria-current")).toBe("page");
     });
   });
 });
