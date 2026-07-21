@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { runMigrations } from "../../db/migrate.js";
+import { EVIDENCE_TYPE_REGISTRY_META } from "@trademark-evidence-assistant/shared";
 
 const { extractTextFromItemMock } = vi.hoisted(() => ({ extractTextFromItemMock: vi.fn() }));
 vi.mock("../ocrService.js", () => ({ extractTextFromItem: extractTextFromItemMock, OcrError: class OcrError extends Error {} }));
@@ -121,6 +122,22 @@ describe("analysisService", () => {
     await startAnalysis(db, workspaceId, "order-c", { evidenceRoot });
     const result = await startAnalysis(db, workspaceId, "order-d", { evidenceRoot });
     expect(result.connectionSuggestions).toHaveLength(0);
+  });
+
+  it("the earlier-analyzed item's own connection suggestion is tagged with *its own* run, not the later item's — visible when re-viewing that item on its own, not just the item whose analysis triggered the match", async () => {
+    insertItem("early", "Printful Orders/early.png");
+    insertItem("later", "Printful Orders/later.png");
+    extractTextFromItemMock.mockResolvedValue(ocrExtraction("Order #PF700700700"));
+    const earlyResult = await startAnalysis(db, workspaceId, "early", { evidenceRoot });
+    await startAnalysis(db, workspaceId, "later", { evidenceRoot }); // discovers "early" as a match, proposes both directions
+
+    // Re-fetching "early"'s own analysis (as if navigating back to it
+    // later, e.g. from the Review Suggestions queue) must still show the
+    // connection — not just "later"'s view of it.
+    const earlyNow = await getLatestAnalysis(db, workspaceId, "early");
+    expect(earlyNow!.connectionSuggestions).toHaveLength(1);
+    expect(earlyNow!.connectionSuggestions[0].targetItemId).toBe("later");
+    expect(earlyNow!.run.id).toBe(earlyResult.run.id); // "early" was never reanalyzed — this is its original, first-and-only run
   });
 
   it("does not create duplicate connection-suggestion rows across repeated analyses", async () => {
@@ -405,5 +422,121 @@ describe("analysisService", () => {
     expect(allRuns).toHaveLength(2);
     const firstRunSuggestions = db.prepare("SELECT COUNT(*) AS c FROM evidence_suggestions WHERE analysis_run_id = ?").get(first.run.id) as { c: number };
     expect(firstRunSuggestions.c).toBeGreaterThan(0); // still present, just marked superseded
+  });
+
+  describe("confirmed-example retrieval (Phase 2)", () => {
+    /** Inserts an already-confirmed evidence item directly, bypassing the confirm flow — a legitimate shortcut for testing retrieval eligibility rules in isolation. */
+    function insertConfirmedExemplar(
+      id: string,
+      relativePath: string,
+      evidenceTypeId: string,
+      opts: { reviewStatus?: string; inclusionDecision?: string | null; registryVersion?: string; missing?: boolean } = {},
+    ) {
+      insertItem(id, relativePath, { evidenceTypeId });
+      db.prepare(
+        `UPDATE evidence_items SET
+           evidence_type_registry_version = ?, review_status = ?, inclusion_decision = ?,
+           missing_since = ?
+         WHERE id = ?`,
+      ).run(
+        opts.registryVersion ?? EVIDENCE_TYPE_REGISTRY_META.version,
+        opts.reviewStatus ?? "reviewed",
+        opts.inclusionDecision ?? null,
+        opts.missing ? new Date().toISOString() : null,
+        id,
+      );
+    }
+
+    it("retrieves a manually confirmed, fully reviewed exemplar sharing the same folder, with a real explanation", async () => {
+      insertConfirmedExemplar("ex-1", "Customer Photos/exemplar.jpg", "customer_photo");
+      insertItem("target-1", "Customer Photos/target.jpg");
+      const result = await startAnalysis(db, workspaceId, "target-1", { evidenceRoot });
+      expect(result.retrievedExamples.length).toBeGreaterThan(0);
+      const retrieved = result.retrievedExamples[0];
+      expect(retrieved.exampleItemId).toBe("ex-1");
+      expect(retrieved.exampleEvidenceTypeId).toBe("customer_photo");
+      expect(retrieved.matchedSignals.length).toBeGreaterThan(0);
+      expect(retrieved.matchedSignals.some((s) => s.toLowerCase().includes("folder"))).toBe(true);
+      expect(retrieved.influenceScore).toBeGreaterThan(0);
+    });
+
+    it("never retrieves an item whose evidence type is only an unconfirmed suggestion, not a real confirmation", async () => {
+      insertItem("unconfirmed-1", "Customer Photos/unconfirmed.jpg"); // evidence_type_id left null — analyzed but never confirmed
+      await startAnalysis(db, workspaceId, "unconfirmed-1", { evidenceRoot });
+      insertItem("target-2", "Customer Photos/target2.jpg");
+      const result = await startAnalysis(db, workspaceId, "target-2", { evidenceRoot });
+      expect(result.retrievedExamples.some((e) => e.exampleItemId === "unconfirmed-1")).toBe(false);
+    });
+
+    it("excludes a pending (unreviewed/in_review) item even if it happens to have an evidence_type_id set", async () => {
+      insertConfirmedExemplar("pending-1", "Customer Photos/pending.jpg", "customer_photo", { reviewStatus: "in_review" });
+      insertItem("target-3", "Customer Photos/target3.jpg");
+      const result = await startAnalysis(db, workspaceId, "target-3", { evidenceRoot });
+      expect(result.retrievedExamples.some((e) => e.exampleItemId === "pending-1")).toBe(false);
+    });
+
+    it("excludes an item flagged needs_follow_up or inclusion 'not_useful' — the closest available signals to 'marked erroneous'", async () => {
+      insertConfirmedExemplar("flagged-1", "Customer Photos/flagged.jpg", "customer_photo", { reviewStatus: "needs_follow_up" });
+      insertConfirmedExemplar("flagged-2", "Customer Photos/flagged2.jpg", "customer_photo", { inclusionDecision: "not_useful" });
+      insertItem("target-4", "Customer Photos/target4.jpg");
+      const result = await startAnalysis(db, workspaceId, "target-4", { evidenceRoot });
+      expect(result.retrievedExamples.some((e) => e.exampleItemId === "flagged-1")).toBe(false);
+      expect(result.retrievedExamples.some((e) => e.exampleItemId === "flagged-2")).toBe(false);
+    });
+
+    it("excludes an exemplar confirmed under a since-changed evidence-type registry version", async () => {
+      insertConfirmedExemplar("old-registry-1", "Customer Photos/old.jpg", "customer_photo", { registryVersion: "0.0.1-old" });
+      insertItem("target-5", "Customer Photos/target5.jpg");
+      const result = await startAnalysis(db, workspaceId, "target-5", { evidenceRoot });
+      expect(result.retrievedExamples.some((e) => e.exampleItemId === "old-registry-1")).toBe(false);
+    });
+
+    it("excludes an exemplar that has since gone missing", async () => {
+      insertConfirmedExemplar("gone-1", "Customer Photos/gone.jpg", "customer_photo", { missing: true });
+      insertItem("target-6", "Customer Photos/target6.jpg");
+      const result = await startAnalysis(db, workspaceId, "target-6", { evidenceRoot });
+      expect(result.retrievedExamples.some((e) => e.exampleItemId === "gone-1")).toBe(false);
+    });
+
+    it("marks a retrieved exemplar 'contradicts' when its confirmed type disagrees with the top suggestion, and 'supports' when it agrees", async () => {
+      insertConfirmedExemplar("agree-1", "Customer Photos/agree.jpg", "customer_photo");
+      insertConfirmedExemplar("disagree-1", "Customer Photos/disagree.jpg", "product_photo");
+      insertItem("target-7", "Customer Photos/target7.jpg");
+      const result = await startAnalysis(db, workspaceId, "target-7", { evidenceRoot });
+      const agree = result.retrievedExamples.find((e) => e.exampleItemId === "agree-1");
+      const disagree = result.retrievedExamples.find((e) => e.exampleItemId === "disagree-1");
+      expect(agree?.agreement).toBe("supports");
+      expect(disagree?.agreement).toBe("contradicts");
+    });
+
+    it("a folder-only classification stays capped at medium confidence even with multiple corroborating confirmed exemplars — never High from folder + exemplars alone", async () => {
+      insertConfirmedExemplar("corrob-1", "Customer Photos/c1.jpg", "customer_photo");
+      insertConfirmedExemplar("corrob-2", "Customer Photos/c2.jpg", "customer_photo");
+      insertConfirmedExemplar("corrob-3", "Customer Photos/c3.jpg", "customer_photo");
+      insertItem("target-8", "Customer Photos/target8.jpg");
+      const result = await startAnalysis(db, workspaceId, "target-8", { evidenceRoot });
+      const top = result.evidenceTypeSuggestions[0];
+      expect(top.proposedValue).toBe("customer_photo");
+      expect(top.confidence).not.toBe("high");
+    });
+
+    it("a corroborated folder-only candidate is upgraded from low to medium, with the corroboration named in the rationale", async () => {
+      insertConfirmedExemplar("boost-1", "Customer Photos/b1.jpg", "customer_photo");
+      insertConfirmedExemplar("boost-2", "Customer Photos/b2.jpg", "customer_photo");
+      insertItem("target-9", "Customer Photos/target9.jpg");
+      const result = await startAnalysis(db, workspaceId, "target-9", { evidenceRoot });
+      const top = result.evidenceTypeSuggestions[0];
+      expect(top.confidence).toBe("medium");
+      expect(top.rationale.toLowerCase()).toContain("confirmed");
+    });
+
+    it("never re-runs OCR to compare against a confirmed exemplar — the exemplar's own past extraction is reused (no new extracted_entities rows are created for the exemplar itself)", async () => {
+      insertConfirmedExemplar("noocr-1", "Printful Orders/order1.png", "customer_order");
+      insertItem("target-10", "Printful Orders/order2.png");
+      const before = (db.prepare("SELECT COUNT(*) AS c FROM extracted_entities WHERE evidence_item_id = 'noocr-1'").get() as { c: number }).c;
+      await startAnalysis(db, workspaceId, "target-10", { evidenceRoot });
+      const after = (db.prepare("SELECT COUNT(*) AS c FROM extracted_entities WHERE evidence_item_id = 'noocr-1'").get() as { c: number }).c;
+      expect(after).toBe(before); // exemplar was never itself (re)analyzed as a side effect of someone else's analysis
+    });
   });
 });

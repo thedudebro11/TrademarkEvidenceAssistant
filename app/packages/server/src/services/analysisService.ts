@@ -13,7 +13,9 @@ import type {
   ReviewDraftPayload,
 } from "@trademark-evidence-assistant/shared";
 import { EVIDENCE_TYPE_REGISTRY_META, getInterviewForType, SUGGESTION_CONFIDENCES } from "@trademark-evidence-assistant/shared";
+import type { RetrievedExampleView } from "@trademark-evidence-assistant/shared";
 import { DETERMINISTIC_RULE_VERSION, METADATA_EXTRACTION_VERSION, runDeterministicAnalysis, type AnalysisEngineInput } from "../engines/analysisEngine.js";
+import { retrieveConfirmedExamples, type RetrievedExample } from "../engines/exemplarRetrieval.js";
 import { getConfiguredAnalysisProvider } from "./analysisProvider.js";
 import { extractTextFromItem, OcrError } from "./ocrService.js";
 import { saveDraftWithTx } from "./reviewDraftService.js";
@@ -41,6 +43,7 @@ interface EvidenceItemRow {
   original_path: string;
   original_filename: string;
   extension: string;
+  mime_type: string;
   sha256: string;
   missing_since: string | null;
   fs_created_at: string | null;
@@ -59,10 +62,19 @@ interface FileMetadataRow {
 function getEvidenceItemRow(db: Database.Database, workspaceId: number, itemId: string): EvidenceItemRow | undefined {
   return db
     .prepare(
-      `SELECT id, original_path, original_filename, extension, sha256, missing_since, fs_created_at, fs_modified_at, evidence_type_id
+      `SELECT id, original_path, original_filename, extension, mime_type, sha256, missing_since, fs_created_at, fs_modified_at, evidence_type_id
        FROM evidence_items WHERE workspace_id = ? AND id = ?`,
     )
     .get(workspaceId, itemId) as EvidenceItemRow | undefined;
+}
+
+/** Concatenated raw text from a confirmed exemplar's own most recent (non-superseded) analysis run — reused as that exemplar's text-overlap signal so retrieval never re-runs OCR (see exemplarRetrieval.ts's doc comment). `null` when the exemplar was never analyzed. */
+function getExemplarTextSignal(db: Database.Database, itemId: string): string | null {
+  const latestRun = db.prepare("SELECT id FROM analysis_runs WHERE evidence_item_id = ? ORDER BY id DESC LIMIT 1").get(itemId) as { id: number } | undefined;
+  if (!latestRun) return null;
+  const rows = db.prepare("SELECT raw_text FROM extracted_entities WHERE analysis_run_id = ?").all(latestRun.id) as { raw_text: string }[];
+  if (rows.length === 0) return null;
+  return rows.map((r) => r.raw_text).join(" ");
 }
 
 function getFileMetadataRow(db: Database.Database, itemId: string): FileMetadataRow | undefined {
@@ -132,6 +144,40 @@ export async function startAnalysis(db: Database.Database, workspaceId: number, 
   const result = runDeterministicAnalysis(engineInput);
   const provider = getConfiguredAnalysisProvider();
   const capability = await provider.checkAvailability();
+
+  // Confirmed-example retrieval (Phase 2) — evaluated against whichever
+  // evidence-type candidate the deterministic engine currently ranks
+  // first, purely to explain/corroborate it, never to invent a
+  // candidate that folder/filename/OCR signals didn't already produce.
+  const topCandidate = result.evidenceTypeCandidates[0] as (typeof result.evidenceTypeCandidates)[number] | undefined;
+  const retrievedExamples: RetrievedExample[] = retrieveConfirmedExamples(
+    db,
+    workspaceId,
+    {
+      itemId,
+      originalFilename: item.original_filename,
+      folderPath: engineInput.folderPath,
+      extension: item.extension,
+      mimeType: item.mime_type,
+      ocrText,
+    },
+    topCandidate?.typeId ?? null,
+    (exampleId) => getExemplarTextSignal(db, exampleId),
+  );
+
+  // A conservative, bounded confidence nudge: real confirmed exemplars
+  // corroborating the current top candidate can lift it from "low" to
+  // "medium" (never further — "folder context alone must not produce
+  // High confidence," and exemplar agreement is still ultimately rooted
+  // in the same folder/filename signals for most of these matches, so it
+  // gets the same ceiling). OCR-content-derived High-confidence
+  // candidates are untouched — they don't need this and this never
+  // downgrades anything.
+  const supportingExamples = retrievedExamples.filter((e) => e.agreement === "supports");
+  if (topCandidate && topCandidate.confidence === "low" && supportingExamples.length >= 2) {
+    topCandidate.confidence = "medium";
+    topCandidate.reasons = [...topCandidate.reasons, `Corroborated by ${supportingExamples.length} of your own prior confirmed "${topCandidate.typeId.replace(/_/g, " ")}" examples with similar signals`];
+  }
 
   // Supersede this item's previous run + its still-open suggestions
   // *before* inserting the new one, in the same transaction as
@@ -217,6 +263,15 @@ export async function startAnalysis(db: Database.Database, workspaceId: number, 
     proposeExactIdentifierConnections(db, workspaceId, itemId, runId, result.entities);
     proposeFileHashConnections(db, workspaceId, itemId, runId, item.sha256);
 
+    const insertExample = db.prepare(
+      `INSERT INTO analysis_retrieved_examples
+         (workspace_id, analysis_run_id, evidence_item_id, example_item_id, example_evidence_type_id, matched_signals_json, influence_score, agreement)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const example of retrievedExamples) {
+      insertExample.run(workspaceId, runId, itemId, example.exampleItemId, example.exampleEvidenceTypeId, JSON.stringify(example.matchedSignals), example.influenceScore, example.agreement);
+    }
+
     return runId;
   });
 
@@ -258,14 +313,24 @@ function proposeExactIdentifierConnections(db: Database.Database, workspaceId: n
   for (const entity of entities) {
     if (!IDENTIFIER_ENTITY_TYPES.has(entity.entityType) || !entity.normalizedValue) continue;
 
+    // `other_run_id` (the *other* item's own current run, from the same
+    // join that found the match) is what its reverse-direction row must
+    // be tagged with — not `runId` (this item's own current run). Every
+    // connectionRows lookup elsewhere (getAnalysisResult,
+    // reviewSuggestionsQueueService) filters by
+    // `analysis_run_id = <that item's own latest run>`, so tagging both
+    // directions with the same single `runId` left the *other* item's
+    // own row permanently invisible whenever that item's analysis was
+    // later viewed on its own — a real bug this comment now prevents
+    // from being reintroduced.
     const matches = db
       .prepare(
-        `SELECT DISTINCT ee.evidence_item_id AS other_item_id
+        `SELECT DISTINCT ee.evidence_item_id AS other_item_id, ar.id AS other_run_id
            FROM extracted_entities ee
            JOIN analysis_runs ar ON ar.id = ee.analysis_run_id AND ar.superseded_at IS NULL
           WHERE ee.workspace_id = ? AND ee.entity_type = ? AND ee.normalized_value = ? AND ee.evidence_item_id != ?`,
       )
-      .all(workspaceId, entity.entityType, entity.normalizedValue, itemId) as { other_item_id: string }[];
+      .all(workspaceId, entity.entityType, entity.normalizedValue, itemId) as { other_item_id: string; other_run_id: number }[];
 
     for (const match of matches) {
       const otherId = match.other_item_id;
@@ -276,7 +341,7 @@ function proposeExactIdentifierConnections(db: Database.Database, workspaceId: n
 
       const rationale = `Both items share the same ${entity.entityType.replace(/_/g, " ")}: "${entity.normalizedValue}".`;
       insertSuggestion.run(workspaceId, itemId, otherId, runId, entity.entityType, entity.normalizedValue, rationale, null);
-      insertSuggestion.run(workspaceId, otherId, itemId, runId, entity.entityType, entity.normalizedValue, rationale, null);
+      insertSuggestion.run(workspaceId, otherId, itemId, match.other_run_id, entity.entityType, entity.normalizedValue, rationale, null);
     }
   }
 }
@@ -314,9 +379,23 @@ function proposeFileHashConnections(db: Database.Database, workspaceId: number, 
       .get(itemId, otherId, otherId, itemId);
     if (alreadyConfirmed) continue;
 
+    // The reverse-direction row must be tagged with the *other* item's
+    // own current run, not this item's — see the identical, more fully
+    // explained fix in proposeExactIdentifierConnections above. Unlike
+    // that function, file-hash matching queries evidence_items directly
+    // rather than joining through analysis_runs, so the other item's own
+    // latest run isn't already in hand and may not exist yet at all (a
+    // duplicate discovered before its twin has ever been analyzed) — in
+    // that case the reverse row is simply not created now; it will be
+    // created correctly, tagged with that item's own run, the first time
+    // that item itself gets analyzed and rediscovers the same match.
+    const otherRun = db.prepare("SELECT id FROM analysis_runs WHERE evidence_item_id = ? AND superseded_at IS NULL ORDER BY id DESC LIMIT 1").get(otherId) as { id: number } | undefined;
+
     const rationale = "Both items are byte-for-byte identical copies of the same file (matching SHA-256 hash).";
     insertSuggestion.run(workspaceId, itemId, otherId, runId, sha256, rationale, null);
-    insertSuggestion.run(workspaceId, otherId, itemId, runId, sha256, rationale, null);
+    if (otherRun) {
+      insertSuggestion.run(workspaceId, otherId, itemId, otherRun.id, sha256, rationale, null);
+    }
   }
 }
 
@@ -417,6 +496,17 @@ export function getLatestAnalysis(db: Database.Database, workspaceId: number, it
   return getAnalysisResult(db, workspaceId, itemId, runRow.id, capability.available);
 }
 
+/** For batchAnalysisService.ts's "Reanalyze Stale" selection — `true` only when a real analysis run exists for this item AND it's stale; `false` for a current run; `null` when the item has never been analyzed at all (not the same thing as stale, so never selected by "Reanalyze Stale"). Reuses the exact same live staleness computation `getLatestAnalysis`/`confirmAnalysisSuggestions` already use. */
+export function isLatestAnalysisStale(db: Database.Database, workspaceId: number, itemId: string): boolean | null {
+  const item = getEvidenceItemRow(db, workspaceId, itemId);
+  if (!item) return null;
+  const runRow = db.prepare("SELECT id, source_fingerprint, evidence_type_registry_version, question_registry_version, deterministic_rule_version, superseded_at FROM analysis_runs WHERE workspace_id = ? AND evidence_item_id = ? ORDER BY id DESC LIMIT 1").get(workspaceId, itemId) as
+    | { id: number; source_fingerprint: string; evidence_type_registry_version: string; question_registry_version: string; deterministic_rule_version: string; superseded_at: string | null }
+    | undefined;
+  if (!runRow) return null;
+  return computeRunStaleness(runRow, item);
+}
+
 function getAnalysisResult(db: Database.Database, workspaceId: number, itemId: string, runId: number, providerAvailable: boolean): AnalysisResultResponse {
   const item = getEvidenceItemRow(db, workspaceId, itemId)!;
   const runRow = db.prepare("SELECT * FROM analysis_runs WHERE id = ?").get(runId) as RunRow;
@@ -508,6 +598,35 @@ function getAnalysisResult(db: Database.Database, workspaceId: number, itemId: s
     state: (run.stale && r.state === "proposed" ? "stale" : r.state) as ConnectionSuggestionView["state"],
   }));
 
+  const exampleRows = db
+    .prepare(
+      `SELECT are.*, ei.original_filename AS example_filename, ei.original_path AS example_original_path
+         FROM analysis_retrieved_examples are
+         JOIN evidence_items ei ON ei.id = are.example_item_id
+        WHERE are.analysis_run_id = ?
+        ORDER BY are.influence_score DESC, are.id`,
+    )
+    .all(runId) as {
+    id: number;
+    example_item_id: string;
+    example_evidence_type_id: string;
+    matched_signals_json: string;
+    influence_score: number;
+    agreement: string;
+    example_filename: string;
+    example_original_path: string;
+  }[];
+  const retrievedExamples: RetrievedExampleView[] = exampleRows.map((r) => ({
+    id: r.id,
+    exampleItemId: r.example_item_id,
+    exampleFilename: r.example_filename,
+    exampleOriginalPath: r.example_original_path,
+    exampleEvidenceTypeId: r.example_evidence_type_id,
+    matchedSignals: JSON.parse(r.matched_signals_json),
+    influenceScore: r.influence_score,
+    agreement: r.agreement as RetrievedExampleView["agreement"],
+  }));
+
   return {
     run,
     evidenceTypeSuggestions,
@@ -515,6 +634,7 @@ function getAnalysisResult(db: Database.Database, workspaceId: number, itemId: s
     entities,
     dates,
     connectionSuggestions,
+    retrievedExamples,
     summary: {
       answerCount: answerSuggestions.filter((s) => s.state !== "stale" && s.state !== "superseded").length,
       dateCount: dates.length,

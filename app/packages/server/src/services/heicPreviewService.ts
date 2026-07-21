@@ -5,6 +5,7 @@ import type Database from "better-sqlite3";
 import type { HeicBackfillJobStatus, HeicPreviewInfo, HeicPreviewStatus } from "@trademark-evidence-assistant/shared";
 import { resolveSafePath, PathTraversalError } from "../security/pathGuard.js";
 import { getHeicDecoder, getPreferredHeicDecoder, PREFERRED_DECODER_ID, type HeicDecoder } from "../engines/heicDecoders/index.js";
+import { runWithConcurrency } from "../utils/concurrency.js";
 
 /**
  * HEIC/HEIF inline preview generation and caching
@@ -407,18 +408,6 @@ export function reconcileAbandonedHeicBackfillJobs(db: Database.Database, worksp
       row.id,
     );
   }
-}
-
-/** Bounded-concurrency worker pool — runs `tasks` with at most `concurrency` in flight at once, awaiting all of them before resolving. */
-async function runWithConcurrency<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>): Promise<void> {
-  let index = 0;
-  async function next(): Promise<void> {
-    const current = index++;
-    if (current >= items.length) return;
-    await worker(items[current]);
-    return next();
-  }
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => next()));
 }
 
 const PER_ITEM_BACKFILL_TIMEOUT_MS = 30_000;

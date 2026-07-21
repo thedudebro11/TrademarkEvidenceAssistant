@@ -14,6 +14,8 @@ import { Toast } from "../components/ui/Toast.js";
 import { ReviewIcon, PackageIcon } from "../components/ui/icons.js";
 import { MissingRecordsModal } from "../components/missingRecords/MissingRecordsModal.js";
 import { ScanPanel } from "../ScanPanel.js";
+import { BatchAnalysisPanel } from "../components/analysis/BatchAnalysisPanel.js";
+import { ReviewSuggestionsQueue } from "../components/analysis/ReviewSuggestionsQueue.js";
 
 /**
  * docs/ui/UI_INFORMATION_ARCHITECTURE.md Page 1 — Home. Every number
@@ -30,6 +32,7 @@ export function HomePage() {
   const [missingCount, setMissingCount] = useState<number | null>(null);
   const [missingModalOpen, setMissingModalOpen] = useState(false);
   const [removalToast, setRemovalToast] = useState<{ message: string; operationId: number | null } | null>(null);
+  const [reviewQueueOpen, setReviewQueueOpen] = useState<{ jobId: number } | null>(null);
 
   const refreshProgress = useCallback(() => {
     fetchProgress()
@@ -216,6 +219,17 @@ export function HomePage() {
                     <Button variant="secondary" onClick={() => setMissingModalOpen(true)}>
                       Review Missing Files
                     </Button>
+                  </div>
+                )}
+              </Card>
+            )}
+
+            {hasScanned && (
+              <Card eyebrow="Evidence Intelligence" title="Batch Analysis">
+                <BatchAnalysisPanel onReadyForReview={(jobId) => setReviewQueueOpen({ jobId })} />
+                {reviewQueueOpen && (
+                  <div style={{ marginTop: 18 }}>
+                    <ReviewSuggestionsQueue jobId={reviewQueueOpen.jobId} onClose={() => setReviewQueueOpen(null)} />
                   </div>
                 )}
               </Card>

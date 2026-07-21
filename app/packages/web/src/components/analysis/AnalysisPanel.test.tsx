@@ -16,6 +16,7 @@ function baseAnalysis(overrides: Partial<AnalysisResultResponse> = {}): Analysis
     entities: [],
     dates: [],
     connectionSuggestions: [],
+    retrievedExamples: [],
     summary: { answerCount: 0, dateCount: 0, identifierCount: 0, connectionCount: 0 },
     providerAvailable: false,
     ...overrides,

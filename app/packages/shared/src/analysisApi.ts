@@ -111,6 +111,28 @@ export interface DateAssertionView {
   explanation: string;
 }
 
+/**
+ * One confirmed exemplar retrieved to explain/corroborate an evidence-
+ * type suggestion — see server's exemplarRetrieval.ts. Never itself a
+ * suggestion or a confirmed value; purely explanatory. `matchedSignals`
+ * is the exact, human-readable list of reasons this exemplar was
+ * retrieved — retrieval is deterministic nearest-neighbor scoring over
+ * real confirmed decisions, never a trained model, so there is always a
+ * concrete explanation to show.
+ */
+export interface RetrievedExampleView {
+  id: number;
+  exampleItemId: string;
+  exampleFilename: string;
+  exampleOriginalPath: string;
+  exampleEvidenceTypeId: string;
+  matchedSignals: string[];
+  /** 0..1 — how strongly this exemplar's signals matched the item being analyzed. */
+  influenceScore: number;
+  /** Whether this exemplar's own confirmed type agrees with the top evidence-type suggestion. */
+  agreement: "supports" | "contradicts";
+}
+
 export interface ConnectionSuggestionView {
   id: number;
   sourceItemId: string;
@@ -134,6 +156,7 @@ export interface AnalysisResultResponse {
   entities: ExtractedEntityView[];
   dates: DateAssertionView[];
   connectionSuggestions: ConnectionSuggestionView[];
+  retrievedExamples: RetrievedExampleView[];
   summary: {
     answerCount: number;
     dateCount: number;
@@ -166,4 +189,110 @@ export interface ConfirmAnalysisResponse {
   acceptedAnswerCount: number;
   acceptedConnectionCount: number;
   rejectedCount: number;
+}
+
+/**
+ * Evidence Intelligence Phase 2 — server-side batch analysis. Every job
+ * only ever calls the existing per-item pipeline above; it can never
+ * confirm anything itself. See server's batchAnalysisService.ts.
+ */
+export type SelectionMode = "selected_ids" | "folder" | "all_unreviewed" | "stale" | "retry_failed";
+
+/**
+ * `extracting`/`classifying`/`suggesting` from the original spec are
+ * deliberately not modeled as distinct persisted states here: the
+ * underlying per-item pipeline (analysisService.startAnalysis) runs
+ * extraction, classification, and suggestion generation as one
+ * inseparable step, so a job-level sub-phase for each would be a
+ * fabricated progress signal this codebase's own "never invent a signal
+ * that isn't real" convention (see ocrEngine.ts's extractors, the
+ * deterministic-only classification rules) rules out. `running` is the
+ * one honest in-progress state; `readyForReview` is exposed as a
+ * computed boolean below rather than a separate status, since it's
+ * simply "status is a successful terminal state" — see the final report
+ * for this reasoning spelled out.
+ */
+export type BatchAnalysisJobStatusValue = "queued" | "running" | "completed" | "completed_with_failures" | "interrupted" | "canceled" | "failed";
+
+export interface BatchAnalysisJobStatus {
+  id: number;
+  status: BatchAnalysisJobStatusValue;
+  selectionMode: SelectionMode;
+  selectionParam: string | null;
+  totalCount: number;
+  processedCount: number;
+  succeededCount: number;
+  failedCount: number;
+  skippedCount: number;
+  currentItemId: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  cancellationRequested: boolean;
+  errorSummary: string | null;
+  deterministicRuleVersion: string;
+  evidenceTypeRegistryVersion: string;
+  providerAvailable: boolean;
+  /** True once `status` is a successful terminal state ('completed' or 'completed_with_failures') — the signal to show the Review Suggestions queue. */
+  readyForReview: boolean;
+}
+
+export interface StartBatchAnalysisRequest {
+  selectionMode: SelectionMode;
+  /** Required (non-empty) for selectionMode: 'selected_ids'. */
+  itemIds?: string[];
+  /** Required for selectionMode: 'folder'. Exact folder match, not recursive. */
+  folderPath?: string;
+  /** Required for selectionMode: 'retry_failed' — the prior job whose failed items should be retried. */
+  sourceJobId?: number;
+}
+
+export interface StartBatchAnalysisResponse {
+  jobId: number;
+}
+
+/** Response for GET /api/analysis/batch/preview — a pre-run report of what a selection would do, without starting anything. */
+export interface BatchAnalysisSelectionPreview {
+  eligibleCount: number;
+  folders: string[];
+  fileTypeBreakdown: Record<string, number>;
+  /** Items matched by the selection but currently missing/unreadable — would be skipped, not attempted. */
+  unreadableCount: number;
+}
+
+export interface SuggestionQueueItemView {
+  evidenceItemId: string;
+  filename: string;
+  folder: string;
+  analysisRunId: number;
+  suggestedEvidenceType: string | null;
+  alternativeEvidenceTypes: string[];
+  confidence: SuggestionConfidence | null;
+  answerSuggestionCount: number;
+  dateCount: number;
+  identifierCount: number;
+  connectionSuggestionCount: number;
+  hasContradiction: boolean;
+  hasUnresolvedQuestion: boolean;
+  failedExtraction: boolean;
+  stale: boolean;
+  providerAvailable: boolean;
+}
+
+export interface SuggestionQueueFilters {
+  jobId?: number;
+  evidenceType?: string;
+  folder?: string;
+  minConfidence?: SuggestionConfidence;
+  unresolvedCustomerStatus?: boolean;
+  hasContradiction?: boolean;
+  hasConnections?: boolean;
+  failedExtraction?: boolean;
+  stale?: boolean;
+  noProvider?: boolean;
+}
+
+export interface SuggestionQueueResponse {
+  items: SuggestionQueueItemView[];
+  total: number;
 }

@@ -9,6 +9,7 @@ import { createBulkReviewRouter } from "./routes/bulkReview.js";
 import { createHeicPreviewRouter } from "./routes/heicPreview.js";
 import { createMissingRecordsRouter } from "./routes/missingRecords.js";
 import { createAnalysisRouter } from "./routes/analysis.js";
+import { createBatchAnalysisRouter } from "./routes/batchAnalysis.js";
 import type { ResolvedWorkspace } from "./config/workspaceConfig.js";
 
 export function createApp(
@@ -27,5 +28,6 @@ export function createApp(
   app.use("/api", createHeicPreviewRouter(db, workspaceId, workspace));
   app.use("/api", createMissingRecordsRouter(db, workspaceId, workspace));
   app.use("/api", createAnalysisRouter(db, workspaceId, workspace));
+  app.use("/api", createBatchAnalysisRouter(db, workspaceId, workspace));
   return app;
 }

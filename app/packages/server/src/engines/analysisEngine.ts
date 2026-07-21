@@ -35,7 +35,7 @@ import {
  * present in the input. A missing identifier is simply absent from the
  * output, never guessed.
  */
-export const DETERMINISTIC_RULE_VERSION = "1";
+export const DETERMINISTIC_RULE_VERSION = "2";
 export const METADATA_EXTRACTION_VERSION = "1";
 
 export interface AnalysisEngineInput {
@@ -265,28 +265,80 @@ function buildEvidenceTypeCandidates(input: AnalysisEngineInput, entities: Engin
     const hasOrderNumber = entities.some((e) => e.entityType === "order_number");
     const hasTracking = entities.some((e) => e.entityType === "tracking_number");
     const hasShipment = entities.some((e) => e.entityType === "shipment_number");
+    const hasLineItemDetails = entities.some((e) => e.entityType === "garment_type" || e.entityType === "size" || e.entityType === "color" || e.entityType === "price");
     const hasInvoiceWord = /\binvoice\b/i.test(text);
+    const hasTotalWord = /\btotal\b/i.test(text);
     const hasDelivered = /\bdelivered\b/i.test(text);
     const hasShipped = /\bshipped\b/i.test(text);
-    const hasOrderStructure = /\border\s*(number|#|status)\b/i.test(text) || /\bshipping\s*address\b/i.test(text);
+    // "order number", "order #", or "order status" as an adjacent
+    // phrase — this is what distinguishes a real order-detail page's
+    // own structure from a bare status word. A standalone shipping/
+    // tracking notice can legitimately say "Delivered" too, but would
+    // not normally say "Order Status".
+    const hasOrderPagePhrase = /\border\s*(number|#|status)\b/i.test(text);
+    const hasShippingAddressPhrase = /\bshipping\s*address\b/i.test(text);
+    const hasFulfillmentWord = /\bfulfill(ed|ment)\b/i.test(text);
 
-    // Printful order-detail page: order-shaped visible identifiers and
-    // document structure — this is the exact case that must never lose
-    // to "product mockups appear in the screenshot".
-    if (hasOrderNumber && hasOrderStructure) {
-      boost("customer_order", "OCR text contains an order number and order-page structure (order status/shipping address)", "high");
-      suppress("design_mockup"); // an order-detail page is never a design mockup, regardless of product thumbnails shown in it
-    }
-    if (hasInvoiceWord && (hasOrderNumber || /\btotal\b/i.test(text))) {
+    // Explicit, deterministic document-type precedence for the order/
+    // invoice/shipment family (Evidence Intelligence Phase 2 fix) —
+    // replaces the previous design, where `customer_order` and
+    // `shipping_confirmation` could both independently reach "high"
+    // confidence and the *displayed order* between them was decided by
+    // which boost() call happened to run first (an accidental,
+    // undocumented tie-break an audit of real FATLETIC Printful
+    // order-detail screenshots caught: they were classified correctly,
+    // but only by coincidence of source-code statement order). Each
+    // branch below now assigns an explicit, different confidence level
+    // per type, so the final sort's confidence-first ordering alone
+    // determines the result — never reasons.length, candidate insertion
+    // order, or which `if` happened to execute first. See
+    // analysisEngine.test.ts's "document-type precedence" tests, which
+    // assert this holds even when a document has every signal at once.
+    if (hasInvoiceWord && (hasOrderNumber || hasTotalWord)) {
+      // 1. An explicit invoice heading/number always takes precedence
+      // over both order-detail and shipment classification.
       boost("printful_invoice", 'OCR text contains "Invoice" alongside an order number or total', "high");
       suppress("design_mockup");
-    }
-    if (hasDelivered && (hasTracking || hasShipment)) {
-      boost("shipping_confirmation", "OCR text confirms delivery alongside a tracking or shipment number", "high");
-      suppress("design_mockup");
-    } else if (hasShipped && (hasTracking || hasShipment)) {
-      boost("shipping_confirmation", "OCR text confirms shipment alongside a tracking or shipment number", "high");
-      suppress("design_mockup");
+    } else {
+      // 2. Count independent, *structural* "this is a real order-detail
+      // page" signals. Deliberately never counts a bare status word
+      // (Delivered/Shipped/Fulfilled) by itself — that alone proves
+      // nothing, since a standalone shipment/tracking notice can
+      // contain the exact same word. Each signal below is something a
+      // bare shipment notice would not normally also contain.
+      const orderStructureSignalCount = [hasOrderNumber, hasOrderPagePhrase, hasLineItemDetails, hasShippingAddressPhrase, hasFulfillmentWord].filter(Boolean).length;
+
+      if (orderStructureSignalCount >= 2) {
+        // 3. A genuine order-detail/dashboard page. Shipped/Delivered/
+        // tracking/shipment information appearing on the same page are
+        // statuses *within* that order record — real evidence, still
+        // extracted as entities above, but never grounds to replace the
+        // primary document type merely because it's on the same page.
+        boost(
+          "customer_order",
+          "Primary document structure is a Printful order-detail page. Shipping and delivery information are statuses within that order record.",
+          "high",
+        );
+        suppress("design_mockup"); // an order-detail page is never a design mockup, regardless of product thumbnails shown in it
+        if ((hasDelivered || hasShipped) && (hasTracking || hasShipment)) {
+          // Still surfaced — as a lower-confidence *alternative* the
+          // user can pick instead, never as the primary type.
+          boost(
+            "shipping_confirmation",
+            "This order-detail page also shows shipment or delivery status, but its primary structure is an order record, not a standalone shipping confirmation.",
+            "medium",
+          );
+        }
+      } else if ((hasDelivered || hasShipped) && (hasTracking || hasShipment)) {
+        // 4. Not enough order-detail structure to be an order record —
+        // a standalone shipment/dispatch/tracking/delivery confirmation.
+        boost(
+          "shipping_confirmation",
+          "Document appears to be a standalone shipment, tracking, or delivery confirmation — it lacks sufficient order-detail structure (no order number, line items, shipping address, or fulfillment language) to be a full order record.",
+          "high",
+        );
+        suppress("design_mockup");
+      }
     }
   }
 

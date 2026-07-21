@@ -225,6 +225,19 @@ function deleteDependentRows(db: Database.Database, itemId: string, snapshot: Ev
   db.prepare("DELETE FROM evidence_suggestions WHERE evidence_item_id = ?").run(itemId);
   db.prepare("DELETE FROM extracted_entities WHERE evidence_item_id = ?").run(itemId);
   db.prepare("DELETE FROM date_assertions WHERE evidence_item_id = ?").run(itemId);
+
+  // Evidence Intelligence Phase 2 (migration 0018) — also before
+  // analysis_runs, since both reference analysis_run_id.
+  // analysis_retrieved_examples is keyed by evidence_item_id (the item
+  // that was analyzed) *and* example_item_id (this item may itself have
+  // been retrieved as someone else's confirmed exemplar), so both sides
+  // are cleared. batch_analysis_job_items is only ever this item's own
+  // row within whatever batch(es) it was part of — deleting it here
+  // never touches other items' rows in the same job, same principle as
+  // bulk_review_operation_items above.
+  db.prepare("DELETE FROM analysis_retrieved_examples WHERE evidence_item_id = ? OR example_item_id = ?").run(itemId, itemId);
+  db.prepare("DELETE FROM batch_analysis_job_items WHERE evidence_item_id = ?").run(itemId);
+
   db.prepare("DELETE FROM analysis_runs WHERE evidence_item_id = ?").run(itemId);
 
   db.prepare(

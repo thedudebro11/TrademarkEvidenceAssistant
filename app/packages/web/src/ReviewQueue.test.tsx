@@ -652,4 +652,22 @@ describe("ReviewQueue", () => {
       expect(screen.getByText("logo_v2.png")).toBeTruthy();
     });
   });
+
+  it("opens the item requested by the Review Suggestions queue (Evidence Intelligence Phase 2) instead of the default next-unreviewed item", async () => {
+    const { setPendingReviewItemId } = await import("./app/router.js");
+    const requestedItem: EvidenceItemDetail = { ...baseItem, id: "item-9", originalFilename: "requested.jpg", originalPath: "requested.jpg" };
+    let nextItemCalled = false;
+    mockFetchSequence({
+      "/evidence-items/progress": () => oneItemProgress,
+      "/evidence-items/next": () => {
+        nextItemCalled = true;
+        return baseItem;
+      },
+      "/evidence-items/item-9": () => requestedItem,
+    });
+    setPendingReviewItemId("item-9");
+    render(<ReviewQueue />);
+    await waitFor(() => expect(screen.getByAltText("requested.jpg")).toBeTruthy());
+    expect(nextItemCalled).toBe(false);
+  });
 });

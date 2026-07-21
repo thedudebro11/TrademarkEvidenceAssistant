@@ -79,6 +79,85 @@ describe("analysisEngine", () => {
     expect(result.evidenceTypeCandidates.some((c) => c.typeId === "design_mockup")).toBe(false);
   });
 
+  describe("document-type precedence: customer_order vs shipping_confirmation vs invoice (Phase 2 fix)", () => {
+    it("A. an order-detail page with order number, line items, shipping address, Delivered status, and a tracking number is primary customer_order — shipping_confirmation is only an alternative, and every identifier is still extracted", () => {
+      const result = runDeterministicAnalysis(
+        baseInput({
+          originalFilename: "order.png",
+          folderPath: "printful orders",
+          ocrText:
+            "Order #PF445566778 Order Status: Fulfilled Shipping Address: 42 Wallaby Way T-Shirt Black Size L $25.00 Delivered March 5, 2026 Tracking: 1Z999AA10123456784",
+        }),
+      );
+      const [top, ...rest] = result.evidenceTypeCandidates;
+      expect(top.typeId).toBe("customer_order");
+      expect(top.confidence).toBe("high");
+      expect(top.reasons.join(" ")).toContain("Primary document structure is a Printful order-detail page. Shipping and delivery information are statuses within that order record.");
+
+      const shippingAlt = rest.find((c) => c.typeId === "shipping_confirmation");
+      expect(shippingAlt).toBeTruthy();
+      expect(shippingAlt!.confidence).toBe("medium"); // alternative, never tied with the primary
+
+      expect(result.entities.some((e) => e.entityType === "order_number")).toBe(true);
+      expect(result.entities.some((e) => e.entityType === "tracking_number")).toBe(true);
+      expect(result.entities.some((e) => e.entityType === "order_status" && e.rawText === "Delivered")).toBe(true);
+    });
+
+    it("B. a standalone tracking/delivery notice with no order-detail structure is primary shipping_confirmation", () => {
+      const result = runDeterministicAnalysis(
+        baseInput({
+          originalFilename: "notice.png",
+          folderPath: "printful orders",
+          ocrText: "Your package was Delivered on July 20, 2026. Carrier: UPS. Tracking: 1Z999AA10123456784",
+        }),
+      );
+      expect(result.evidenceTypeCandidates[0].typeId).toBe("shipping_confirmation");
+      expect(result.evidenceTypeCandidates[0].confidence).toBe("high");
+      expect(result.evidenceTypeCandidates.some((c) => c.typeId === "customer_order")).toBe(false);
+    });
+
+    it("C. an explicit invoice heading with a total (and even delivery language) is primary the invoice type, never customer_order or shipping_confirmation", () => {
+      const result = runDeterministicAnalysis(
+        baseInput({
+          originalFilename: "doc1.pdf",
+          extension: "pdf",
+          folderPath: "",
+          ocrText: "Invoice #INV-2026-004 FATLETIC Hoodie x2 Total $89.00 Delivered July 18, 2026",
+        }),
+      );
+      expect(result.evidenceTypeCandidates[0].typeId).toBe("printful_invoice");
+      expect(result.evidenceTypeCandidates[0].confidence).toBe("high");
+      expect(result.evidenceTypeCandidates.some((c) => c.typeId === "customer_order")).toBe(false);
+      expect(result.evidenceTypeCandidates.some((c) => c.typeId === "shipping_confirmation")).toBe(false);
+    });
+
+    it("D. candidate ordering is guaranteed by an explicit confidence gap (high vs medium), not by which rule happens to run first or reasons.length — so it stays stable no matter how the internal rules are reordered later", () => {
+      // Deliberately identical to test A's maximal-signal input: every
+      // order-page signal AND every shipment/delivery signal present at
+      // once, the exact case that used to tie at "high" and be decided
+      // by source-code statement order.
+      const result = runDeterministicAnalysis(
+        baseInput({
+          originalFilename: "order.png",
+          folderPath: "printful orders",
+          ocrText:
+            "Order #PF700700700 Order Status: Fulfilled Shipping Address: 1 Main St Hoodie Black Size M $40.00 Shipped July 1, 2026 Shipment #SHP12345678",
+        }),
+      );
+      const typeIds = result.evidenceTypeCandidates.map((c) => c.typeId);
+      expect(typeIds[0]).toBe("customer_order");
+      expect(typeIds).toContain("shipping_confirmation");
+      const customerOrder = result.evidenceTypeCandidates.find((c) => c.typeId === "customer_order")!;
+      const shippingConfirmation = result.evidenceTypeCandidates.find((c) => c.typeId === "shipping_confirmation")!;
+      // The guarantee: these two are never equal, so the final sort's
+      // confidence-first comparison alone fixes the order — nothing
+      // about *when* each branch runs can change this result.
+      expect(customerOrder.confidence).toBe("high");
+      expect(shippingConfirmation.confidence).toBe("medium");
+      expect(customerOrder.confidence).not.toBe(shippingConfirmation.confidence);
+    });
+  });
+
   it("a folder/filename-only 'product' vs 'mockup' signal still directionally distinguishes the two — a single weak signal like this is Low, per the confidence rubric ('folder alone')", () => {
     const productPhoto = runDeterministicAnalysis(baseInput({ originalFilename: "sticker_box.jpg", folderPath: "Product Photos" }));
     expect(productPhoto.evidenceTypeCandidates[0].typeId).toBe("product_photo");

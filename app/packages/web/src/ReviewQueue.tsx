@@ -11,7 +11,7 @@ import {
   type SuggestionConfidence,
 } from "@trademark-evidence-assistant/shared";
 import { fetchItem, fetchNextItem, fetchPreviousItem, fetchProgress, saveReviewDraft, undoBulkOperation } from "./api.js";
-import { setNavigationGuard } from "./app/router.js";
+import { consumePendingReviewItemId, setNavigationGuard } from "./app/router.js";
 import { EvidenceViewer } from "./components/evidence-viewer/EvidenceViewer.js";
 import { MetadataPanel } from "./MetadataPanel.js";
 import { DecisionBar } from "./DecisionBar.js";
@@ -298,7 +298,8 @@ export function ReviewQueue() {
           setState({ phase: "empty" });
           return;
         }
-        const first = await fetchNextItem(null);
+        const requestedItemId = consumePendingReviewItemId();
+        const first = requestedItemId ? await fetchItem(requestedItemId) : await fetchNextItem(null);
         if (first) {
           setState({ phase: "reviewing", item: first });
           dispatchDraft({ type: "reset", item: first });

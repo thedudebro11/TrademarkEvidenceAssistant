@@ -22,6 +22,12 @@ import type {
   RemoveMissingRecordsResponse,
   ConfirmAnalysisRequest,
   ConfirmAnalysisResponse,
+  BatchAnalysisJobStatus,
+  BatchAnalysisSelectionPreview,
+  StartBatchAnalysisRequest,
+  StartBatchAnalysisResponse,
+  SuggestionQueueFilters,
+  SuggestionQueueResponse,
   ReviewAnswer,
   ReviewDraftPayload,
   HealthResponse,
@@ -492,4 +498,63 @@ export async function confirmAnalysisSuggestions(itemId: string, request: Confir
     throw new Error(body.error ?? `Confirming analysis failed with status ${res.status}`);
   }
   return body as ConfirmAnalysisResponse;
+}
+
+/** A pre-run report for a batch analysis selection (eligible count, folders, file types, unreadable items) without starting anything. */
+export async function previewBatchAnalysis(request: StartBatchAnalysisRequest): Promise<BatchAnalysisSelectionPreview> {
+  const res = await fetch("/api/analysis/batch/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  const body = await res.json();
+  if (!res.ok) {
+    throw new Error(body.error ?? `Previewing the batch selection failed with status ${res.status}`);
+  }
+  return body as BatchAnalysisSelectionPreview;
+}
+
+/** Starts a server-side batch analysis job and returns its id immediately — processing runs on the server in the background, never as one browser request per file. */
+export async function startBatchAnalysis(request: StartBatchAnalysisRequest): Promise<StartBatchAnalysisResponse> {
+  const res = await fetch("/api/analysis/batch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  const body = await res.json();
+  if (!res.ok) {
+    throw new Error(body.error ?? `Starting the batch analysis job failed with status ${res.status}`);
+  }
+  return body as StartBatchAnalysisResponse;
+}
+
+export async function fetchBatchAnalysisStatus(jobId: number): Promise<BatchAnalysisJobStatus> {
+  const res = await fetch(`/api/analysis/batch/${jobId}`);
+  const body = await res.json();
+  if (!res.ok) {
+    throw new Error(body.error ?? `Fetching batch analysis status failed with status ${res.status}`);
+  }
+  return body as BatchAnalysisJobStatus;
+}
+
+export async function cancelBatchAnalysis(jobId: number): Promise<void> {
+  const res = await fetch(`/api/analysis/batch/${jobId}/cancel`, { method: "POST" });
+  if (!res.ok) {
+    const body = await res.json();
+    throw new Error(body.error ?? `Canceling the batch analysis job failed with status ${res.status}`);
+  }
+}
+
+export async function fetchSuggestionsQueue(filters: SuggestionQueueFilters = {}): Promise<SuggestionQueueResponse> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined) params.set(key, String(value));
+  }
+  const query = params.toString();
+  const res = await fetch(`/api/analysis/suggestions-queue${query ? `?${query}` : ""}`);
+  const body = await res.json();
+  if (!res.ok) {
+    throw new Error(body.error ?? `Fetching the suggestions queue failed with status ${res.status}`);
+  }
+  return body as SuggestionQueueResponse;
 }

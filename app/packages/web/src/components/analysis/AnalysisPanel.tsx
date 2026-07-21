@@ -159,6 +159,8 @@ export function AnalysisPanel({ evidenceItemId, onConfirmed }: AnalysisPanelProp
 
             <IdentifySection analysis={analysis} typeDecisionId={typeDecisionId} onSelectType={setTypeDecisionId} />
 
+            <RetrievedExamplesSection examples={analysis.retrievedExamples} />
+
             <AnswersSection
               suggestions={analysis.answerSuggestions}
               decisions={answerDecisions}
@@ -211,6 +213,34 @@ function IdentifySection({ analysis, typeDecisionId, onSelectType }: { analysis:
           Clear selection
         </Button>
       )}
+    </section>
+  );
+}
+
+/**
+ * Explainable confirmed-example retrieval (Phase 2) — never itself a
+ * suggestion, purely showing which of the user's own prior confirmed
+ * decisions informed the Identify suggestion above, with the exact
+ * signals that made them similar and whether they agree or disagree.
+ */
+function RetrievedExamplesSection({ examples }: { examples: AnalysisResultResponse["retrievedExamples"] }) {
+  if (examples.length === 0) return null;
+  return (
+    <section aria-label="Confirmed examples">
+      <h4>Based on your prior confirmed examples</h4>
+      <ul style={{ display: "flex", flexDirection: "column", gap: 8, listStyle: "none", padding: 0 }}>
+        {examples.map((e) => (
+          <li key={e.id}>
+            <span>
+              <strong>{e.exampleFilename}</strong> — {typeLabel(e.exampleEvidenceTypeId)}{" "}
+              <Badge tone={e.agreement === "supports" ? "success" : "warning"}>{e.agreement}</Badge>{" "}
+              <Badge tone="neutral">influence {Math.round(e.influenceScore * 100)}%</Badge>
+            </span>
+            <br />
+            <small>{e.matchedSignals.join("; ")}</small>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

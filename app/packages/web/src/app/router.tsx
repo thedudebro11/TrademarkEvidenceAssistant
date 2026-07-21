@@ -39,6 +39,27 @@ export function setNavigationGuard(guard: (() => boolean) | null): void {
   navigationGuard = guard;
 }
 
+/**
+ * A module-level "open this specific item next" request, same pattern
+ * and rationale as `navigationGuard` above (must be readable
+ * synchronously, outside React state) — set by the Review Suggestions
+ * queue (Evidence Intelligence Phase 2) right before navigating to
+ * "/review" so ReviewQueue.tsx's mount effect opens that exact item
+ * instead of its normal "next unreviewed item" default. Consumed
+ * (cleared) on read so a later plain visit to "/review" isn't affected.
+ */
+let pendingReviewItemId: string | null = null;
+
+export function setPendingReviewItemId(itemId: string): void {
+  pendingReviewItemId = itemId;
+}
+
+export function consumePendingReviewItemId(): string | null {
+  const id = pendingReviewItemId;
+  pendingReviewItemId = null;
+  return id;
+}
+
 export function RouterProvider({ children }: { children: ReactNode }) {
   const [path, setPath] = useState(window.location.pathname);
 
