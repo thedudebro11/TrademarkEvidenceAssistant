@@ -1,0 +1,17 @@
+-- Tracks whether a heic_previews row was produced automatically (the
+-- app's current preferred decoder) or by an explicit user "Retry with
+-- Alternate Decoder" action. Existing rows all default to 'auto',
+-- which is exactly correct: every row that predates this migration was
+-- produced by the original ImageMagick-only pipeline running
+-- automatically, never by explicit user decoder choice.
+--
+-- heicPreviewService.ts's effectiveStatus() uses this together with
+-- preview_generator to invalidate ("stale") any 'auto' row whose
+-- generator no longer matches the app's current preferred decoder —
+-- this is what makes every pre-existing ImageMagick-generated preview
+-- (including any produced before ImageMagick's HEIC delegate was found
+-- to corrupt certain files) get transparently regenerated with the new
+-- preferred decoder the next time it's viewed or backfilled, without a
+-- one-off cleanup script. A 'manual' row (the user explicitly retried
+-- with a specific decoder) is exempt from that automatic invalidation.
+ALTER TABLE heic_previews ADD COLUMN decoder_selection TEXT NOT NULL DEFAULT 'auto';

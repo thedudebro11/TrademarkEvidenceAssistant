@@ -18,6 +18,27 @@ interface RouterContextValue {
 
 const RouterContext = createContext<RouterContextValue | null>(null);
 
+/**
+ * A single, module-level navigation guard — not React state, since it
+ * needs to be readable synchronously from `navigate()` before any
+ * re-render happens. A page with unsaved work (currently: Review Queue's
+ * draft) registers a guard function; it returns true to allow the
+ * navigation or false to block it (the guard itself is responsible for
+ * asking the user, e.g. via `window.confirm`). Only one guard can be
+ * active at a time, matching there only being one page mounted at once.
+ *
+ * Deliberately does not intercept browser back/forward (`popstate`) —
+ * by the time that event fires the URL has already changed, and
+ * reliably "undoing" it without confusing the user is a much bigger
+ * change than this hand-rolled router's scope. Tab close/refresh is
+ * handled separately via `window.beforeunload` in ReviewQueue.tsx.
+ */
+let navigationGuard: (() => boolean) | null = null;
+
+export function setNavigationGuard(guard: (() => boolean) | null): void {
+  navigationGuard = guard;
+}
+
 export function RouterProvider({ children }: { children: ReactNode }) {
   const [path, setPath] = useState(window.location.pathname);
 
@@ -30,9 +51,9 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   }, []);
 
   function navigate(next: AppPath) {
-    if (next !== window.location.pathname) {
-      window.history.pushState({}, "", next);
-    }
+    if (next === window.location.pathname) return;
+    if (navigationGuard && !navigationGuard()) return;
+    window.history.pushState({}, "", next);
     setPath(next);
   }
 

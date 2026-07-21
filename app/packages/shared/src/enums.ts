@@ -92,6 +92,38 @@ export const USEFULNESS_BANDS = [
 export type UsefulnessBand = (typeof USEFULNESS_BANDS)[number];
 
 /**
+ * Lifecycle of a HEIC/HEIF item's generated inline preview
+ * (docs/ADR_0005_HEIC_PREVIEWS.md). Never describes the original file
+ * itself — only the derived, browser-viewable image generated from it.
+ */
+export const HEIC_PREVIEW_STATUSES = [
+  "not_requested",
+  "queued",
+  "generating",
+  "ready",
+  "failed",
+  "unsupported_backend",
+  "source_missing",
+  "stale",
+] as const;
+export type HeicPreviewStatus = (typeof HEIC_PREVIEW_STATUSES)[number];
+
+/**
+ * The decoder backends `heicPreviewService.ts` knows how to invoke
+ * (`packages/server/src/engines/heicDecoders/`). `libheif-js` is the
+ * only one ever used automatically — `imagemagick` is retained solely
+ * as a manually-selectable "Retry with Alternate Decoder" option after
+ * its HEIC delegate was found to produce visually corrupted output for
+ * a real evidence file (docs/ADR_0005_HEIC_PREVIEWS.md).
+ */
+export const HEIC_DECODER_IDS = ["libheif-js", "imagemagick"] as const;
+export type HeicDecoderId = (typeof HEIC_DECODER_IDS)[number];
+
+/** Whether a heic_previews row was produced by the app's automatic preferred-decoder policy, or by an explicit user "Retry with Alternate Decoder" action. */
+export const HEIC_DECODER_SELECTIONS = ["auto", "manual"] as const;
+export type HeicDecoderSelection = (typeof HEIC_DECODER_SELECTIONS)[number];
+
+/**
  * The stored, final inclusion classification (spec 03's review_status
  * distinguishes reviewed/needs_follow_up/excluded, but not Include vs.
  * Maybe within "reviewed" — this fills that gap). Never set directly by

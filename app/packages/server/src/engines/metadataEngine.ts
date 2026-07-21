@@ -1,14 +1,31 @@
 import { imageSize } from "image-size";
 import { PDFDocument } from "pdf-lib";
 import { readFile } from "node:fs/promises";
+import { basename } from "node:path";
 import { readPsdDimensions } from "./psdHeader.js";
 import { readXcfDimensions } from "./xcfHeader.js";
 import { readSvgDimensions } from "./svgDimensions.js";
+import { extractHeicExifMetadata } from "./heicExifEngine.js";
+import { inferDateFromFilename } from "./filenameDateInference.js";
+
+// Kept as its own local set (not imported from services/heicPreviewService.ts)
+// so this engines/ module never depends on the services/ layer above it.
+const HEIC_EXTENSIONS = new Set(["heic", "heif"]);
 
 export interface ExtractedMetadata {
   width: number | null;
   height: number | null;
   pageCount: number | null;
+  /** HEIC/HEIF-only — always undefined for every other extension. See docs/ADR_0005_HEIC_PREVIEWS.md; the original file is always the source for these, never the generated preview. */
+  exifDateTimeOriginal?: string | null;
+  exifCreateDate?: string | null;
+  gpsLatitude?: number | null;
+  gpsLongitude?: number | null;
+  cameraMake?: string | null;
+  cameraModel?: string | null;
+  orientation?: number | null;
+  colorProfile?: string | null;
+  filenameInferredDate?: string | null;
 }
 
 const EMPTY: ExtractedMetadata = { width: null, height: null, pageCount: null };
@@ -27,6 +44,7 @@ const RASTER_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "gif"]);
 export async function extractMetadata(
   absolutePath: string,
   extension: string,
+  filename: string = basename(absolutePath),
 ): Promise<ExtractedMetadata> {
   const ext = extension.toLowerCase().replace(/^\./, "");
 
@@ -34,6 +52,30 @@ export async function extractMetadata(
     if (RASTER_EXTENSIONS.has(ext)) {
       const dims = imageSize(absolutePath);
       return { width: dims.width ?? null, height: dims.height ?? null, pageCount: null };
+    }
+
+    if (HEIC_EXTENSIONS.has(ext)) {
+      // Always from the original HEIC/HEIF file — never from the
+      // generated preview, which is produced by an entirely separate
+      // operation (heicPreviewService.ts) and never treated as a
+      // metadata source (docs/ADR_0005_HEIC_PREVIEWS.md). Filename
+      // inference is a weak, clearly-separate assertion — never
+      // combined with or preferred over the EXIF fields above it.
+      const exif = await extractHeicExifMetadata(absolutePath);
+      return {
+        width: exif.width,
+        height: exif.height,
+        pageCount: null,
+        exifDateTimeOriginal: exif.exifDateTimeOriginal,
+        exifCreateDate: exif.exifCreateDate,
+        gpsLatitude: exif.gpsLatitude,
+        gpsLongitude: exif.gpsLongitude,
+        cameraMake: exif.cameraMake,
+        cameraModel: exif.cameraModel,
+        orientation: exif.orientation,
+        colorProfile: exif.colorProfile,
+        filenameInferredDate: inferDateFromFilename(filename),
+      };
     }
 
     if (ext === "svg") {

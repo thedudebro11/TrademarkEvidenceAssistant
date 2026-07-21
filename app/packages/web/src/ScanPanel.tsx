@@ -1,6 +1,6 @@
-import { useState } from "react";
-import type { ScanSummary } from "@trademark-evidence-assistant/shared";
-import { triggerScan } from "./api.js";
+import { useRef, useState } from "react";
+import type { HeicBackfillJobStatus, ScanSummary } from "@trademark-evidence-assistant/shared";
+import { fetchHeicBackfillStatus, triggerHeicPreviewBackfill, triggerScan } from "./api.js";
 import { Button } from "./components/ui/Button.js";
 import { StatusMessage } from "./components/ui/StatusMessage.js";
 import { Badge } from "./components/ui/Badge.js";
@@ -11,6 +11,20 @@ type ScanState =
   | { phase: "scanning" }
   | { phase: "complete"; summary: ScanSummary }
   | { phase: "error"; message: string };
+
+type BackfillState =
+  | { phase: "idle" }
+  | { phase: "running"; job: HeicBackfillJobStatus }
+  | { phase: "done"; job: HeicBackfillJobStatus }
+  | { phase: "error"; message: string };
+
+const BACKFILL_POLL_INTERVAL_MS = 1500;
+
+/** Statuses a poller should keep waiting through — everything else is terminal. Matches HeicBackfillJobStatus["status"] in shared/models.ts. */
+const ACTIVE_BACKFILL_STATUSES = new Set<HeicBackfillJobStatus["status"]>(["queued", "running"]);
+
+/** Terminal statuses that mean "something didn't fully succeed" — shown with a Retry action rather than a plain success message. */
+const RETRYABLE_BACKFILL_STATUSES = new Set<HeicBackfillJobStatus["status"]>(["failed", "interrupted", "completed_with_failures"]);
 
 interface ScanPanelProps {
   evidenceRootExists: boolean;
@@ -28,6 +42,8 @@ interface ScanPanelProps {
  */
 export function ScanPanel({ evidenceRootExists, onScanComplete }: ScanPanelProps) {
   const [state, setState] = useState<ScanState>({ phase: "idle" });
+  const [backfillState, setBackfillState] = useState<BackfillState>({ phase: "idle" });
+  const backfillCancelledRef = useRef(false);
 
   async function handleScan() {
     setState({ phase: "scanning" });
@@ -40,6 +56,41 @@ export function ScanPanel({ evidenceRootExists, onScanComplete }: ScanPanelProps
         phase: "error",
         message: err instanceof Error ? err.message : String(err),
       });
+    }
+  }
+
+  /**
+   * "Generate Missing Previews" — one request starts (or, per the
+   * server's own duplicate-prevention, reuses an already-active) backfill
+   * job (docs/ADR_0005_HEIC_PREVIEWS.md), then this polls that job's own
+   * progress endpoint rather than issuing one browser request per HEIC
+   * file; the actual conversions run on the server in the background.
+   *
+   * The job can already be in a terminal state by the time the *first*
+   * status fetch resolves — guaranteed, in fact, whenever there is
+   * nothing left to do (every candidate already has a current preview),
+   * since the server's background work then finishes synchronously fast
+   * enough to beat the round trip back to the browser. The phase after
+   * every fetch — including this first one — is always derived from the
+   * job's actual status, never assumed to be "running": that's what
+   * previously left this stuck on "0 of N processed" forever whenever a
+   * job finished before the loop below ever got to run.
+   */
+  async function handleBackfill() {
+    backfillCancelledRef.current = false;
+    try {
+      const { jobId } = await triggerHeicPreviewBackfill();
+      let job = await fetchHeicBackfillStatus(jobId);
+      setBackfillState({ phase: ACTIVE_BACKFILL_STATUSES.has(job.status) ? "running" : "done", job });
+      while (!backfillCancelledRef.current && ACTIVE_BACKFILL_STATUSES.has(job.status)) {
+        await new Promise((resolve) => setTimeout(resolve, BACKFILL_POLL_INTERVAL_MS));
+        job = await fetchHeicBackfillStatus(jobId);
+        if (!backfillCancelledRef.current) setBackfillState({ phase: ACTIVE_BACKFILL_STATUSES.has(job.status) ? "running" : "done", job });
+      }
+    } catch (err) {
+      if (!backfillCancelledRef.current) {
+        setBackfillState({ phase: "error", message: err instanceof Error ? err.message : String(err) });
+      }
     }
   }
 
@@ -77,6 +128,42 @@ export function ScanPanel({ evidenceRootExists, onScanComplete }: ScanPanelProps
       )}
 
       {state.phase === "complete" && <ScanSummaryView summary={state.summary} />}
+
+      <Button
+        variant="secondary"
+        onClick={() => void handleBackfill()}
+        disabled={backfillState.phase === "running"}
+        icon={backfillState.phase === "running" ? <SpinnerIcon size={18} /> : undefined}
+      >
+        Generate Missing Previews
+      </Button>
+
+      {backfillState.phase === "running" && (
+        <StatusMessage tone="info">
+          <span role="status">
+            Generating HEIC previews… {backfillState.job.processedCount} of {backfillState.job.totalCount} processed.
+          </span>
+        </StatusMessage>
+      )}
+      {backfillState.phase === "done" && (
+        <>
+          <StatusMessage tone={RETRYABLE_BACKFILL_STATUSES.has(backfillState.job.status) ? "warning" : "success"}>
+            <span role="status">
+              {backfillState.job.succeededCount} preview{backfillState.job.succeededCount === 1 ? "" : "s"} generated
+              {backfillState.job.failedCount > 0 ? `, ${backfillState.job.failedCount} failed` : ""}
+              {backfillState.job.skippedCount > 0 ? ` (${backfillState.job.skippedCount} already had a current preview)` : ""}
+              {backfillState.job.status === "interrupted" ? " — interrupted before it could finish" : ""}.
+              {backfillState.job.errorMessage ? ` ${backfillState.job.errorMessage}` : ""}
+            </span>
+          </StatusMessage>
+          {RETRYABLE_BACKFILL_STATUSES.has(backfillState.job.status) && (
+            <Button variant="secondary" onClick={() => void handleBackfill()}>
+              Retry
+            </Button>
+          )}
+        </>
+      )}
+      {backfillState.phase === "error" && <StatusMessage tone="error">Could not generate missing previews. {backfillState.message}</StatusMessage>}
     </section>
   );
 }

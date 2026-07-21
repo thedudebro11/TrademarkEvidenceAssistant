@@ -85,10 +85,16 @@ export async function runScan(
        WHERE id = @id`,
     );
     const upsertMetadata = db.prepare(
-      `INSERT INTO file_metadata (evidence_item_id, width, height, page_count, extracted_at)
-       VALUES (@evidenceItemId, @width, @height, @pageCount, datetime('now'))
+      `INSERT INTO file_metadata
+         (evidence_item_id, width, height, page_count, exif_date_time_original, exif_create_date,
+          gps_latitude, gps_longitude, camera_make, camera_model, orientation, color_profile, filename_inferred_date, extracted_at)
+       VALUES (@evidenceItemId, @width, @height, @pageCount, @exifDateTimeOriginal, @exifCreateDate,
+               @gpsLatitude, @gpsLongitude, @cameraMake, @cameraModel, @orientation, @colorProfile, @filenameInferredDate, datetime('now'))
        ON CONFLICT(evidence_item_id) DO UPDATE SET
-         width = @width, height = @height, page_count = @pageCount, extracted_at = datetime('now')`,
+         width = @width, height = @height, page_count = @pageCount, exif_date_time_original = @exifDateTimeOriginal,
+         exif_create_date = @exifCreateDate, gps_latitude = @gpsLatitude, gps_longitude = @gpsLongitude,
+         camera_make = @cameraMake, camera_model = @cameraModel, orientation = @orientation,
+         color_profile = @colorProfile, filename_inferred_date = @filenameInferredDate, extracted_at = datetime('now')`,
     );
 
     for (const file of discovered) {
@@ -96,7 +102,7 @@ export async function runScan(
       const extension = extname(file.relativePath).replace(/^\./, "");
       const id = deriveEvidenceItemId(workspaceId, file.relativePath);
       const sha256 = await sha256File(file.absolutePath);
-      const metadata = await extractMetadata(file.absolutePath, extension);
+      const metadata = await extractMetadata(file.absolutePath, extension, basename(file.relativePath));
       const mimeType = mimeTypeForExtension(extension);
 
       const existing = existingByPath.get(file.relativePath);
@@ -140,6 +146,15 @@ export async function runScan(
         width: metadata.width,
         height: metadata.height,
         pageCount: metadata.pageCount,
+        exifDateTimeOriginal: metadata.exifDateTimeOriginal ?? null,
+        exifCreateDate: metadata.exifCreateDate ?? null,
+        gpsLatitude: metadata.gpsLatitude ?? null,
+        gpsLongitude: metadata.gpsLongitude ?? null,
+        cameraMake: metadata.cameraMake ?? null,
+        cameraModel: metadata.cameraModel ?? null,
+        orientation: metadata.orientation ?? null,
+        colorProfile: metadata.colorProfile ?? null,
+        filenameInferredDate: metadata.filenameInferredDate ?? null,
       });
     }
 

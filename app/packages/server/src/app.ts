@@ -5,6 +5,10 @@ import { createScanRouter } from "./routes/scan.js";
 import { createEvidenceItemsRouter } from "./routes/evidenceItems.js";
 import { createExportRouter } from "./routes/export.js";
 import { createBinderRouter } from "./routes/binder.js";
+import { createBulkReviewRouter } from "./routes/bulkReview.js";
+import { createHeicPreviewRouter } from "./routes/heicPreview.js";
+import { createMissingRecordsRouter } from "./routes/missingRecords.js";
+import { createAnalysisRouter } from "./routes/analysis.js";
 import type { ResolvedWorkspace } from "./config/workspaceConfig.js";
 
 export function createApp(
@@ -19,5 +23,9 @@ export function createApp(
   app.use("/api", createEvidenceItemsRouter(db, workspaceId, workspace));
   app.use("/api", createExportRouter(db, workspaceId, workspace));
   app.use("/api", createBinderRouter(db, workspaceId, workspace.name));
+  app.use("/api", createBulkReviewRouter(db, workspaceId));
+  app.use("/api", createHeicPreviewRouter(db, workspaceId, workspace));
+  app.use("/api", createMissingRecordsRouter(db, workspaceId, workspace));
+  app.use("/api", createAnalysisRouter(db, workspaceId, workspace));
   return app;
 }

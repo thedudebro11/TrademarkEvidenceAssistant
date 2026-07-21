@@ -138,7 +138,20 @@ describe("reviewService", () => {
         id: string;
       };
       const detail = reviewService.getItemDetail(db, workspaceId, psd.id);
-      expect(detail?.metadata).toEqual({ width: 40, height: 30, pageCount: null });
+      expect(detail?.metadata).toEqual({
+        width: 40,
+        height: 30,
+        pageCount: null,
+        exifDateTimeOriginal: null,
+        exifCreateDate: null,
+        gpsLatitude: null,
+        gpsLongitude: null,
+        cameraMake: null,
+        cameraModel: null,
+        orientation: null,
+        colorProfile: null,
+        filenameInferredDate: null,
+      });
     });
   });
 

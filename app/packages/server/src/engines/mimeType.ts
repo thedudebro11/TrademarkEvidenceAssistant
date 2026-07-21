@@ -10,6 +10,8 @@ const EXTENSION_TO_MIME: Record<string, string> = {
   webp: "image/webp",
   gif: "image/gif",
   svg: "image/svg+xml",
+  heic: "image/heic",
+  heif: "image/heif",
   pdf: "application/pdf",
   psd: "image/vnd.adobe.photoshop",
   xcf: "image/x-xcf",

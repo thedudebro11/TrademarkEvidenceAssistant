@@ -31,6 +31,9 @@ const baseItem: EvidenceItemDetail = {
   answers: [],
   connections: [],
   usefulness: { computed: { score: 0, band: "Undetermined", positiveFactors: [], missingElements: [] }, override: null, effective: { score: 0, band: "Undetermined", positiveFactors: [], missingElements: [] } },
+  evidenceType: null,
+  evidenceTypeSuggestion: null,
+  noRelatedEvidence: false,
 };
 
 describe("QuestionsPanel", () => {

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import type { ReviewProgress, ScanSummary } from "@trademark-evidence-assistant/shared";
+import type { RemoveMissingRecordsResponse, ReviewProgress, ScanSummary } from "@trademark-evidence-assistant/shared";
 import { useAppState } from "../app/AppStateContext.js";
 import { Link } from "../app/router.js";
-import { fetchProgress } from "../api.js";
+import { fetchMissingRecordsPreview, fetchProgress, undoMissingRecordsRemoval } from "../api.js";
 import { PageHeader } from "../components/layout/PageHeader.js";
 import { ContentGrid } from "../components/layout/ContentGrid.js";
 import { Card } from "../components/ui/Card.js";
@@ -10,7 +10,9 @@ import { GlassPanel } from "../components/ui/GlassPanel.js";
 import { Button } from "../components/ui/Button.js";
 import { ProgressBar } from "../components/ui/ProgressBar.js";
 import { StatusMessage } from "../components/ui/StatusMessage.js";
+import { Toast } from "../components/ui/Toast.js";
 import { ReviewIcon, PackageIcon } from "../components/ui/icons.js";
+import { MissingRecordsModal } from "../components/missingRecords/MissingRecordsModal.js";
 import { ScanPanel } from "../ScanPanel.js";
 
 /**
@@ -25,6 +27,9 @@ export function HomePage() {
   const { health } = useAppState();
   const [progress, setProgress] = useState<ReviewProgress | null>(null);
   const [lastScan, setLastScan] = useState<ScanSummary | null>(null);
+  const [missingCount, setMissingCount] = useState<number | null>(null);
+  const [missingModalOpen, setMissingModalOpen] = useState(false);
+  const [removalToast, setRemovalToast] = useState<{ message: string; operationId: number | null } | null>(null);
 
   const refreshProgress = useCallback(() => {
     fetchProgress()
@@ -32,9 +37,48 @@ export function HomePage() {
       .catch(() => setProgress(null));
   }, []);
 
+  const refreshMissingCount = useCallback(() => {
+    fetchMissingRecordsPreview()
+      .then((result) => setMissingCount(result.confidentlyMissing.length))
+      .catch(() => setMissingCount(null));
+  }, []);
+
   useEffect(() => {
     refreshProgress();
-  }, [refreshProgress]);
+    refreshMissingCount();
+  }, [refreshProgress, refreshMissingCount]);
+
+  function handleRecordsRemoved(result: RemoveMissingRecordsResponse) {
+    setMissingModalOpen(false);
+    refreshProgress();
+    refreshMissingCount();
+    const parts: string[] = [];
+    if (result.removedCount > 0) parts.push(`${result.removedCount} missing evidence record${result.removedCount === 1 ? "" : "s"} removed.`);
+    if (result.skippedCount > 0) {
+      const reasons = new Set(result.skipped.map((s) => s.reasonLabel));
+      parts.push(`${result.skippedCount} ${result.skippedCount === 1 ? "was" : "were"} skipped because ${[...reasons].join("; ").toLowerCase()}.`);
+    }
+    if (result.removedCount === 0 && result.skippedCount === 0) parts.push("No records were removed.");
+    setRemovalToast({ message: parts.join(" "), operationId: result.removedCount > 0 ? result.operationId : null });
+  }
+
+  function handleUndo() {
+    if (!removalToast?.operationId) return;
+    const operationId = removalToast.operationId;
+    setRemovalToast(null);
+    undoMissingRecordsRemoval(operationId)
+      .then((result) => {
+        refreshProgress();
+        refreshMissingCount();
+        setRemovalToast({
+          message: result.restoredCount > 0 ? `Restored ${result.restoredCount} evidence record${result.restoredCount === 1 ? "" : "s"}. Undo restores the application record only. It cannot restore the deleted source file.` : "Nothing could be restored.",
+          operationId: null,
+        });
+      })
+      .catch((err) => {
+        setRemovalToast({ message: `Undo failed: ${err instanceof Error ? err.message : String(err)}`, operationId: null });
+      });
+  }
 
   if (!health) {
     return (
@@ -161,12 +205,35 @@ export function HomePage() {
                   evidenceRootExists={evidenceRootExists}
                   onScanComplete={() => {
                     refreshProgress();
+                    refreshMissingCount();
                   }}
                 />
+                {missingCount !== null && missingCount > 0 && (
+                  <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ color: "var(--text-secondary)", font: "var(--text-metadata)" }}>
+                      {missingCount} missing
+                    </span>
+                    <Button variant="secondary" onClick={() => setMissingModalOpen(true)}>
+                      Review Missing Files
+                    </Button>
+                  </div>
+                )}
               </Card>
             )}
           </div>
         </ContentGrid>
+      )}
+
+      <MissingRecordsModal open={missingModalOpen} onClose={() => setMissingModalOpen(false)} onRemoved={handleRecordsRemoved} />
+
+      {removalToast && (
+        <Toast
+          tone={removalToast.operationId ? "success" : "info"}
+          message={removalToast.message}
+          actionLabel={removalToast.operationId ? "Undo" : undefined}
+          onAction={removalToast.operationId ? handleUndo : undefined}
+          onDismiss={() => setRemovalToast(null)}
+        />
       )}
     </>
   );

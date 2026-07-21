@@ -1,59 +1,44 @@
 import { useState } from "react";
 import {
   USEFULNESS_BANDS,
+  type DraftUsefulnessOverride,
   type EvidenceItemDetail,
   type UsefulnessBand,
 } from "@trademark-evidence-assistant/shared";
-import { clearUsefulnessOverride, setUsefulnessOverride } from "./api.js";
 
 interface UsefulnessPanelProps {
   item: EvidenceItemDetail;
-  onChanged: (updated: EvidenceItemDetail) => void;
+  draftOverride: DraftUsefulnessOverride;
+  onSetOverride: (score: number, band: UsefulnessBand, note: string) => void;
+  onRemoveOverride: () => void;
 }
 
 /**
- * Presentation only. Always shows the computed score's reasoning even
- * when an override is active — docs/DESIGN_LANGUAGE.md: "the application
- * never hides ... why something scored highly." Never claims legal
- * sufficiency (spec 08) — the copy here only ever says "organizational
- * aid," matching the disclaimer language used throughout the app.
+ * Always shows the computed score's reasoning even when an override is
+ * staged — docs/DESIGN_LANGUAGE.md: "the application never hides ... why
+ * something scored highly." Never claims legal sufficiency (spec 08).
+ *
+ * The override *value* (once submitted) lives in the parent Review
+ * Draft (`draftOverride`), surviving this panel unmounting on accordion
+ * collapse. The open/closed state of the edit form itself is local,
+ * transient UI state — an unsubmitted, in-progress form isn't a valid
+ * override to stage (same reasoning as ConnectionsPanel's add-form).
  */
-export function UsefulnessPanel({ item, onChanged }: UsefulnessPanelProps) {
+export function UsefulnessPanel({ item, draftOverride, onSetOverride, onRemoveOverride }: UsefulnessPanelProps) {
   const [overriding, setOverriding] = useState(false);
   const [score, setScore] = useState(String(item.usefulness.effective.score));
   const [band, setBand] = useState<UsefulnessBand>(item.usefulness.effective.band);
   const [note, setNote] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
   const { computed, override, effective } = item.usefulness;
+  const pendingSet = draftOverride.action === "set" ? draftOverride : null;
+  const pendingClear = draftOverride.action === "clear";
 
-  async function handleSubmitOverride(e: React.FormEvent) {
+  function handleSubmitOverride(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    setBusy(true);
-    try {
-      const updated = await setUsefulnessOverride(item.id, Number(score), band, note);
-      onChanged(updated);
-      setOverriding(false);
-      setNote("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleClearOverride() {
-    setBusy(true);
-    try {
-      const updated = await clearUsefulnessOverride(item.id);
-      onChanged(updated);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
+    onSetOverride(Number(score), band, note);
+    setOverriding(false);
+    setNote("");
   }
 
   return (
@@ -63,12 +48,23 @@ export function UsefulnessPanel({ item, onChanged }: UsefulnessPanelProps) {
         conclusion.
       </p>
 
-      {override && (
+      {pendingSet && (
+        <p role="status">
+          Pending override (not yet saved): {pendingSet.band} ({pendingSet.score}/100). Reason: {pendingSet.note}
+          <button onClick={onRemoveOverride}>Undo pending override</button>
+        </p>
+      )}
+
+      {!pendingSet && pendingClear && (
+        <p role="status">
+          The existing override will be removed when you save. <button onClick={onRemoveOverride}>Undo</button>
+        </p>
+      )}
+
+      {!pendingSet && !pendingClear && override && (
         <p role="status">
           This is a manual override. Reason: {override.note}
-          <button onClick={() => void handleClearOverride()} disabled={busy}>
-            Remove override
-          </button>
+          <button onClick={onRemoveOverride}>Remove override</button>
         </p>
       )}
 
@@ -93,14 +89,10 @@ export function UsefulnessPanel({ item, onChanged }: UsefulnessPanelProps) {
         )}
       </div>
 
-      {!overriding && (
-        <button onClick={() => setOverriding(true)} disabled={busy}>
-          Override this score
-        </button>
-      )}
+      {!overriding && <button onClick={() => setOverriding(true)}>Override this score</button>}
 
       {overriding && (
-        <form onSubmit={(e) => void handleSubmitOverride(e)}>
+        <form onSubmit={handleSubmitOverride}>
           <label htmlFor="override-score">Score (0-100)</label>
           <input
             id="override-score"
@@ -120,16 +112,14 @@ export function UsefulnessPanel({ item, onChanged }: UsefulnessPanelProps) {
           </select>
           <label htmlFor="override-note">Why are you overriding the computed score?</label>
           <input id="override-note" value={note} onChange={(e) => setNote(e.target.value)} required />
-          <button type="submit" disabled={busy || !note.trim()}>
+          <button type="submit" disabled={!note.trim()}>
             Save Override
           </button>
-          <button type="button" onClick={() => setOverriding(false)} disabled={busy}>
+          <button type="button" onClick={() => setOverriding(false)}>
             Cancel
           </button>
         </form>
       )}
-
-      {error && <p role="alert">{error} Your original files were not affected.</p>}
     </div>
   );
 }

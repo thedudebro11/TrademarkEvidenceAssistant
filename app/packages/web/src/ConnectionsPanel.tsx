@@ -1,130 +1,127 @@
-import { useState } from "react";
-import {
-  CONNECTION_TYPES,
-  SUGGESTION_CONFIDENCES,
-  type ConnectionType,
-  type EvidenceItemDetail,
-  type SuggestionConfidence,
-} from "@trademark-evidence-assistant/shared";
-import { createConnection, removeConnection } from "./api.js";
+import type { Ref } from "react";
+import { Badge } from "./components/ui/Badge.js";
+import { Button } from "./components/ui/Button.js";
+import { StatusMessage } from "./components/ui/StatusMessage.js";
+import { LinkIcon } from "./components/ui/icons.js";
+import type { DraftConnectionView } from "./reviewDraft.js";
+
+const EXAMPLE_CHAINS = [
+  "Design Mockup → PSD Source",
+  "PSD Source → Final Logo",
+  "Final Logo → Product Mockup",
+  "Product Photo → Instagram Post",
+  "Invoice → Shipment",
+  "Shipment → Customer Order",
+];
 
 interface ConnectionsPanelProps {
-  item: EvidenceItemDetail;
-  onChanged: (updated: EvidenceItemDetail) => void;
-  refetchItem: () => Promise<EvidenceItemDetail | null>;
+  connections: DraftConnectionView[];
+  /** "No Related Evidence" workflow — an intentional review outcome, distinct from never having opened this section. */
+  noRelatedEvidence: boolean;
+  onRemove: (draftKey: string) => void;
+  onUnmarkRemoval: (draftKey: string) => void;
+  onToggleNoRelatedEvidence: (value: boolean) => void;
+  /** Opens the large Connections Workspace drawer for browsing/selecting candidates — see components/connections/ConnectionsWorkspace.tsx. */
+  onOpenWorkspace: () => void;
+  /** Attached to the trigger button so ConnectionsWorkspace can return focus here on close. */
+  triggerRef: Ref<HTMLButtonElement>;
 }
 
 /**
- * Presentation only. Renders simple evidence chains per spec 07 ("no
- * complex graph in v1") — a flat list, not a visualization. Target items
- * are identified by original path rather than a search/picker UI, which
- * spec 07's "no complex graph" scope doesn't call for building.
+ * The compact "Connect" accordion panel: shows the current connection
+ * list and the "No Related Evidence" workflow (both unchanged since the
+ * Connections Workspace redesign — that redesign only replaced the
+ * candidate *browser*, which is now a separate large drawer opened from
+ * this panel's "Browse Evidence to Link" button, not an inline strip
+ * confined to the accordion's width).
+ *
+ * The connection list (and the "no related evidence" intent) are fully
+ * controlled by the parent Review Draft — every value here survives
+ * this panel unmounting on accordion collapse.
+ *
+ * "No related evidence" is never a fake connection row — it's review
+ * metadata only (`noRelatedEvidence` on the draft/payload), and the
+ * checkbox is only offered while there are zero connections; the
+ * moment one exists (added here or already persisted), that state
+ * always wins and the checkbox disappears — the two states can't
+ * coexist by construction, not just by convention.
  */
-export function ConnectionsPanel({ item, onChanged, refetchItem }: ConnectionsPanelProps) {
-  const [targetPath, setTargetPath] = useState("");
-  const [type, setType] = useState<ConnectionType>("related_to");
-  const [explanation, setExplanation] = useState("");
-  const [confidence, setConfidence] = useState<SuggestionConfidence | "">("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function handleAdd(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setBusy(true);
-    try {
-      await createConnection(item.id, targetPath.trim(), type, explanation.trim(), confidence || null);
-      const refreshed = await refetchItem();
-      if (refreshed) onChanged(refreshed);
-      setTargetPath("");
-      setExplanation("");
-      setConfidence("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleRemove(connectionId: number) {
-    setBusy(true);
-    try {
-      await removeConnection(connectionId);
-      const refreshed = await refetchItem();
-      if (refreshed) onChanged(refreshed);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
+export function ConnectionsPanel({
+  connections,
+  noRelatedEvidence,
+  onRemove,
+  onUnmarkRemoval,
+  onToggleNoRelatedEvidence,
+  onOpenWorkspace,
+  triggerRef,
+}: ConnectionsPanelProps) {
+  const hasConnections = connections.length > 0;
 
   return (
     <div aria-label="Evidence connections">
-      {item.connections.length === 0 ? (
-        <p>No related evidence has been linked yet.</p>
-      ) : (
+      {hasConnections && (
         <ul>
-          {item.connections.map((c) => (
-            <li key={c.connectionId}>
-              <span>{c.direction === "outgoing" ? "Supports →" : "← Supported by"}</span>{" "}
+          {connections.map((c) => (
+            <li key={c.draftKey}>
+              <span>{c.direction === "outgoing" || c.direction === "new" ? "Supports →" : "← Supported by"}</span>{" "}
               <span>{c.relatedOriginalPath}</span> <span>({c.type.replace(/_/g, " ")})</span>
               <p>{c.explanation}</p>
-              <button onClick={() => void handleRemove(c.connectionId)} disabled={busy}>
-                Remove
-              </button>
+              {c.markedForRemoval && <Badge tone="warning">Pending removal</Badge>}
+              {c.connectionId === null && <Badge tone="info">Pending addition</Badge>}
+              {c.markedForRemoval ? (
+                <button onClick={() => onUnmarkRemoval(c.draftKey)}>Keep</button>
+              ) : (
+                <button onClick={() => onRemove(c.draftKey)}>Remove</button>
+              )}
             </li>
           ))}
         </ul>
       )}
 
-      <form onSubmit={(e) => void handleAdd(e)}>
-        <label htmlFor="connection-target-path">Related file's path</label>
-        <input
-          id="connection-target-path"
-          value={targetPath}
-          onChange={(e) => setTargetPath(e.target.value)}
-          placeholder="e.g. Proof Files/invoice.pdf"
-          required
-        />
+      {!hasConnections && !noRelatedEvidence && (
+        <div className="connections-empty-state">
+          <p>No connections have been linked yet.</p>
+          <p>
+            Connections are optional.
+            <br />
+            Only create one when another file genuinely supports, references, or is part of the same evidence chain.
+          </p>
+          <ul className="connections-examples">
+            {EXAMPLE_CHAINS.map((chain) => (
+              <li key={chain}>
+                <small>{chain}</small>
+              </li>
+            ))}
+          </ul>
+          <p>
+            <small>These examples are informational only.</small>
+          </p>
+        </div>
+      )}
 
-        <label htmlFor="connection-type">Relationship type</label>
-        <select id="connection-type" value={type} onChange={(e) => setType(e.target.value as ConnectionType)}>
-          {CONNECTION_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {t.replace(/_/g, " ")}
-            </option>
-          ))}
-        </select>
+      {!hasConnections && noRelatedEvidence && (
+        <StatusMessage tone="success">
+          <strong>No related evidence</strong> — This evidence item was reviewed and no meaningful supporting
+          relationships currently exist.
+        </StatusMessage>
+      )}
 
-        <label htmlFor="connection-explanation">Why are these connected?</label>
-        <input
-          id="connection-explanation"
-          value={explanation}
-          onChange={(e) => setExplanation(e.target.value)}
-          required
-        />
+      {!hasConnections && (
+        <label>
+          <input
+            type="checkbox"
+            checked={noRelatedEvidence}
+            onChange={(e) => onToggleNoRelatedEvidence(e.target.checked)}
+          />
+          No related evidence
+        </label>
+      )}
 
-        <label htmlFor="connection-confidence">Confidence</label>
-        <select
-          id="connection-confidence"
-          value={confidence}
-          onChange={(e) => setConfidence(e.target.value as SuggestionConfidence | "")}
-        >
-          <option value="">Not set</option>
-          {SUGGESTION_CONFIDENCES.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-
-        <button type="submit" disabled={busy || !targetPath.trim() || !explanation.trim()}>
-          Link Evidence
-        </button>
-      </form>
-
-      {error && <p role="alert">{error} Your original files were not affected.</p>}
+      {!noRelatedEvidence && (
+        <Button ref={triggerRef} variant="secondary" icon={<LinkIcon size={16} />} onClick={onOpenWorkspace}>
+          Browse Evidence to Link
+        </Button>
+      )}
     </div>
   );
 }

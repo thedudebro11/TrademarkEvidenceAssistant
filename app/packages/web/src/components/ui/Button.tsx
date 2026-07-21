@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: "primary" | "secondary" | "tertiary" | "destructive";
@@ -6,12 +6,16 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: ReactNode;
 }
 
-export function Button({ variant = "secondary", fullWidth, icon, className, children, ...rest }: ButtonProps) {
+/** forwardRef so callers can attach a ref (e.g. for focus management after closing a dialog opened from this button) without losing the `btn` styling. */
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { variant = "secondary", fullWidth, icon, className, children, ...rest },
+  ref,
+) {
   const classes = ["btn", `btn--${variant}`, fullWidth ? "btn--full" : "", className].filter(Boolean).join(" ");
   return (
-    <button className={classes} {...rest}>
+    <button ref={ref} className={classes} {...rest}>
       {icon}
       {children}
     </button>
   );
-}
+});

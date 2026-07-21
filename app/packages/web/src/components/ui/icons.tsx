@@ -119,6 +119,25 @@ export function CloseIcon(props: IconProps) {
   );
 }
 
+export function ExpandIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M9 4H4v5M15 4h5v5M4 15v5h5M20 15v5h-5" />
+    </svg>
+  );
+}
+
+/** Stacked-files glyph — Archive Similar's icon, signaling "this action affects multiple files" at a glance. */
+export function LayersIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M12 3l9 5-9 5-9-5 9-5Z" />
+      <path d="M3 13l9 5 9-5" />
+      <path d="M3 8l9 5 9-5" />
+    </svg>
+  );
+}
+
 export function LinkIcon(props: IconProps) {
   return (
     <svg {...base(props)}>

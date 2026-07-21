@@ -40,4 +40,29 @@ describe("extractMetadata", () => {
     const result = await extractMetadata(join(GOLDEN, "does_not_exist.jpg"), "jpg");
     expect(result).toEqual({ width: null, height: null, pageCount: null });
   });
+
+  // The HEIC/HEIF success path (real EXIF/GPS/orientation parsing, with
+  // `magick` mocked) is covered by heicExifEngine.test.ts — this file
+  // never mocks child_process, so it only exercises the fail-soft path
+  // here, which is genuinely representative of any environment without
+  // ImageMagick installed (this one included).
+  it(
+    "29. HEIC extraction fails soft (never throws, dimensions null) on a nonexistent file — whether or not ImageMagick is installed in this environment, JPEG/PNG/PDF extraction above is unaffected by the new branch",
+    async () => {
+      // This machine may have a real ImageMagick install (unlike when this
+      // test was first written) — heicExifEngine.ts then genuinely spawns
+      // `magick identify` against a file that does not exist, which is
+      // slower than the instant ENOENT an absent binary produces, so this
+      // needs more than Vitest's default 5s. Deliberately still not
+      // mocking child_process — the point of this file is to prove the
+      // real fail-soft path end-to-end, present-binary or not.
+      const result = await extractMetadata(join(GOLDEN, "does_not_exist.heic"), "heic", "IMG_20260717_020251.heic");
+      expect(result.width).toBeNull();
+      expect(result.exifDateTimeOriginal).toBeNull();
+      // Filename inference runs independently of ImageMagick and must
+      // still work even when the EXIF extractor itself fails.
+      expect(result.filenameInferredDate).toBe("2026-07-17T02:02:51");
+    },
+    20_000,
+  );
 });

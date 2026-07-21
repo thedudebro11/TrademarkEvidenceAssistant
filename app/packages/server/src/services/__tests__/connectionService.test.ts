@@ -94,7 +94,41 @@ describe("connectionService", () => {
           explanation: "x",
           confidence: null,
         }),
-      ).toThrow(/No evidence item found/);
+      ).toThrow(/No evidence item matches/);
+    });
+
+    it("resolves a pasted absolute Windows path via a suffix match against the stored relative path", () => {
+      const connection = connectionService.createConnection(
+        db,
+        workspaceId,
+        productPhotoId,
+        "C:\\Users\\oscar\\TrademarkEvidenceAssistant\\workspaces\\Fatletic\\evidence\\printful_invoice.pdf",
+        { type: "product_to_invoice", explanation: "Pasted from Explorer.", confidence: null },
+      );
+      expect(connection.targetItemId).toBe(invoiceId);
+    });
+
+    it("resolves an absolute POSIX-style path the same way", () => {
+      const connection = connectionService.createConnection(
+        db,
+        workspaceId,
+        productPhotoId,
+        "/home/oscar/TrademarkEvidenceAssistant/workspaces/Fatletic/evidence/printful_invoice.pdf",
+        { type: "product_to_invoice", explanation: "Pasted from a file manager.", confidence: null },
+      );
+      expect(connection.targetItemId).toBe(invoiceId);
+    });
+
+    it("the suffix fallback still requires the whole stored relative path to match, not just a partial filename", () => {
+      // "voice.pdf" is shorter than the stored "printful_invoice.pdf" and
+      // isn't a real suffix of it, so this must still be rejected.
+      expect(() =>
+        connectionService.createConnection(db, workspaceId, productPhotoId, "voice.pdf", {
+          type: "related_to",
+          explanation: "x",
+          confidence: null,
+        }),
+      ).toThrow(/No evidence item matches/);
     });
 
     it("rejects an invalid confidence value", () => {

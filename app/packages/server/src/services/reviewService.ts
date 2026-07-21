@@ -1,18 +1,30 @@
+import { dirname, extname } from "node:path";
 import type Database from "better-sqlite3";
 import type {
+  ConnectionCandidate,
   EvidenceItemDetail,
+  EvidenceTreeFolderNode,
+  EvidenceTreeNode,
+  EvidenceTypeAssignment,
+  EvidenceTypeSuggestion,
   FileRole,
   InclusionDecision,
   ReviewAnswer,
   ReviewDecisionAction,
   SuggestionConfidence,
 } from "@trademark-evidence-assistant/shared";
-import { FILE_ROLES, SUGGESTION_CONFIDENCES } from "@trademark-evidence-assistant/shared";
+import {
+  EVIDENCE_TYPE_REGISTRY_META,
+  FILE_ROLES,
+  SUGGESTION_CONFIDENCES,
+  suggestEvidenceType,
+} from "@trademark-evidence-assistant/shared";
 import { computeProgress, pickNextUnreviewed, pickPrevious } from "../engines/reviewQueueEngine.js";
 import type { QueueItem, ReviewProgressCounts } from "../engines/reviewQueueEngine.js";
 import { resolveSafePath, PathTraversalError } from "../security/pathGuard.js";
 import { getConnectionsForItem } from "./connectionService.js";
 import { getUsefulness } from "./scoringService.js";
+import { getHeicPreviewInfo } from "./heicPreviewService.js";
 
 interface EvidenceItemRow {
   id: string;
@@ -32,6 +44,71 @@ interface EvidenceItemRow {
   notes_updated_at: string | null;
   decided_at: string | null;
   file_role: string | null;
+  no_related_evidence: number;
+  evidence_type_id: string | null;
+  evidence_type_registry_version: string | null;
+  evidence_type_confidence: string | null;
+  evidence_type_reason: string | null;
+  evidence_type_source: string | null;
+  evidence_type_confirmed_at: string | null;
+}
+
+function evidenceTypeAssignmentFromRow(row: EvidenceItemRow): EvidenceTypeAssignment | null {
+  if (!row.evidence_type_id || !row.evidence_type_confirmed_at) return null;
+  return {
+    typeId: row.evidence_type_id,
+    registryVersion: row.evidence_type_registry_version ?? EVIDENCE_TYPE_REGISTRY_META.version,
+    confidence: row.evidence_type_confidence as SuggestionConfidence | null,
+    reason: row.evidence_type_reason,
+    source: (row.evidence_type_source as EvidenceTypeAssignment["source"]) ?? "user",
+    confirmedAt: row.evidence_type_confirmed_at,
+  };
+}
+
+/**
+ * Computes a fresh, non-persisted evidence-type suggestion (Phase 3.5
+ * Part 4) using the deterministic, explainable rules in
+ * `shared/evidenceTypeRegistry.ts`. Sibling extensions are read from
+ * other items in the same folder — matches the spec's own worked
+ * example, "Located beside PSD files". Exported for reuse by
+ * `evidenceTypeService.ts` and its dedicated suggestion route; kept here
+ * (not in evidenceTypeService.ts) to avoid a circular import, since
+ * evidenceTypeService already depends on several functions below.
+ */
+export function computeEvidenceTypeSuggestion(
+  db: Database.Database,
+  workspaceId: number,
+  itemId: string,
+): EvidenceTypeSuggestion | null {
+  const row = db
+    .prepare(
+      `SELECT ei.original_path AS original_path, ei.extension AS extension,
+              fm.width AS width, fm.height AS height
+       FROM evidence_items ei
+       LEFT JOIN file_metadata fm ON fm.evidence_item_id = ei.id
+       WHERE ei.workspace_id = ? AND ei.id = ?`,
+    )
+    .get(workspaceId, itemId) as
+    | { original_path: string; extension: string; width: number | null; height: number | null }
+    | undefined;
+  if (!row) return null;
+
+  const folder = dirname(row.original_path);
+  const siblingRows = db
+    .prepare(`SELECT original_path FROM evidence_items WHERE workspace_id = ? AND id != ?`)
+    .all(workspaceId, itemId) as { original_path: string }[];
+  const siblingExtensions = siblingRows
+    .filter((s) => dirname(s.original_path) === folder)
+    .map((s) => extname(s.original_path).replace(/^\./, ""));
+
+  return suggestEvidenceType({
+    filename: row.original_path.split(/[\\/]/).pop() ?? row.original_path,
+    extension: row.extension,
+    folderPath: folder === "." ? "" : folder,
+    width: row.width,
+    height: row.height,
+    siblingExtensions,
+  });
 }
 
 /**
@@ -55,10 +132,29 @@ function decisionToState(
   }
 }
 
-function mapRow(db: Database.Database, row: EvidenceItemRow): EvidenceItemDetail {
+function mapRow(db: Database.Database, workspaceId: number, row: EvidenceItemRow): EvidenceItemDetail {
   const metadataRow = db
-    .prepare("SELECT width, height, page_count FROM file_metadata WHERE evidence_item_id = ?")
-    .get(row.id) as { width: number | null; height: number | null; page_count: number | null } | undefined;
+    .prepare(
+      `SELECT width, height, page_count, exif_date_time_original, exif_create_date,
+              gps_latitude, gps_longitude, camera_make, camera_model, orientation, color_profile, filename_inferred_date
+       FROM file_metadata WHERE evidence_item_id = ?`,
+    )
+    .get(row.id) as
+    | {
+        width: number | null;
+        height: number | null;
+        page_count: number | null;
+        exif_date_time_original: string | null;
+        exif_create_date: string | null;
+        gps_latitude: number | null;
+        gps_longitude: number | null;
+        camera_make: string | null;
+        camera_model: string | null;
+        orientation: number | null;
+        color_profile: string | null;
+        filename_inferred_date: string | null;
+      }
+    | undefined;
 
   const duplicateRows = db
     .prepare(
@@ -95,6 +191,8 @@ function mapRow(db: Database.Database, row: EvidenceItemRow): EvidenceItemDetail
   );
   const connections = getConnectionsForItem(db, row.id);
   const fileRole = row.file_role as FileRole | null;
+  const evidenceType = evidenceTypeAssignmentFromRow(row);
+  const evidenceTypeSuggestion = evidenceType ? null : computeEvidenceTypeSuggestion(db, workspaceId, row.id);
 
   return {
     id: row.id,
@@ -114,7 +212,20 @@ function mapRow(db: Database.Database, row: EvidenceItemRow): EvidenceItemDetail
     notesUpdatedAt: row.notes_updated_at,
     decidedAt: row.decided_at,
     metadata: metadataRow
-      ? { width: metadataRow.width, height: metadataRow.height, pageCount: metadataRow.page_count }
+      ? {
+          width: metadataRow.width,
+          height: metadataRow.height,
+          pageCount: metadataRow.page_count,
+          exifDateTimeOriginal: metadataRow.exif_date_time_original,
+          exifCreateDate: metadataRow.exif_create_date,
+          gpsLatitude: metadataRow.gps_latitude,
+          gpsLongitude: metadataRow.gps_longitude,
+          cameraMake: metadataRow.camera_make,
+          cameraModel: metadataRow.camera_model,
+          orientation: metadataRow.orientation,
+          colorProfile: metadataRow.color_profile,
+          filenameInferredDate: metadataRow.filename_inferred_date,
+        }
       : null,
     duplicates: duplicateRows.map((d) => ({
       evidenceItemId: d.evidence_item_id,
@@ -132,12 +243,19 @@ function mapRow(db: Database.Database, row: EvidenceItemRow): EvidenceItemDetail
       Boolean(row.notes && row.notes.trim()),
       connections.map((c) => c.type),
     ),
+    evidenceType,
+    evidenceTypeSuggestion,
+    noRelatedEvidence: Boolean(row.no_related_evidence),
+    heicPreview: getHeicPreviewInfo(db, workspaceId, row.id),
   };
 }
 
 const ITEM_COLUMNS = `id, original_path, original_filename, extension, mime_type, file_size, sha256,
   discovered_at, fs_created_at, fs_modified_at, missing_since, review_status,
-  inclusion_decision, notes, notes_updated_at, decided_at, file_role`;
+  inclusion_decision, notes, notes_updated_at, decided_at, file_role,
+  evidence_type_id, evidence_type_registry_version, evidence_type_confidence,
+  evidence_type_reason, evidence_type_source, evidence_type_confirmed_at,
+  no_related_evidence`;
 
 function getOrderedQueueItems(db: Database.Database, workspaceId: number): QueueItem[] {
   const rows = db
@@ -153,6 +271,111 @@ export function getProgress(db: Database.Database, workspaceId: number): ReviewP
   return computeProgress(rows.map((r) => r.review_status as QueueItem["reviewStatus"]));
 }
 
+/**
+ * Lightweight candidate list for the Connections picker — every other
+ * item in the workspace, excluding the one currently being reviewed
+ * (can't connect to itself). Deliberately includes not-yet-reviewed
+ * items too: evidence often genuinely relates to something you haven't
+ * gotten to yet (e.g. a source file that produced the export you're
+ * looking at right now), and forcing "reviewed only" just pushed people
+ * toward typing a raw path by hand instead. `reviewStatus`/
+ * `inclusionDecision` still ride along so the picker can show at a
+ * glance what's been decided and what hasn't. Deliberately not the full
+ * EvidenceItemDetail shape; this is only ever used to fill in a
+ * connection's target path.
+ */
+export function listConnectionCandidates(
+  db: Database.Database,
+  workspaceId: number,
+  excludeItemId: string,
+): ConnectionCandidate[] {
+  const rows = db
+    .prepare(
+      `SELECT id, original_path, original_filename, review_status, inclusion_decision, evidence_type_id
+       FROM evidence_items
+       WHERE workspace_id = ? AND id != ?
+       ORDER BY original_path`,
+    )
+    .all(workspaceId, excludeItemId) as {
+    id: string;
+    original_path: string;
+    original_filename: string;
+    review_status: string;
+    inclusion_decision: string | null;
+    evidence_type_id: string | null;
+  }[];
+
+  return rows.map((r) => ({
+    id: r.id,
+    originalPath: r.original_path,
+    originalFilename: r.original_filename,
+    reviewStatus: r.review_status as EvidenceItemDetail["reviewStatus"],
+    inclusionDecision: r.inclusion_decision as InclusionDecision | null,
+    evidenceTypeId: r.evidence_type_id,
+  }));
+}
+
+/**
+ * Builds a folder-tree view of every item in the workspace, nested by
+ * `original_path` (always forward-slash-normalized by the scanner —
+ * see scannerEngine.ts — regardless of the OS this runs on). Purely a
+ * read of already-scanned data; never touches the filesystem itself.
+ * Folders are sorted before files at each level, then alphabetically,
+ * so the tree reads the same way a file explorer would.
+ */
+export function buildEvidenceTree(db: Database.Database, workspaceId: number): EvidenceTreeNode[] {
+  const rows = db
+    .prepare(
+      `SELECT id, original_path, review_status, inclusion_decision
+       FROM evidence_items
+       WHERE workspace_id = ?
+       ORDER BY original_path`,
+    )
+    .all(workspaceId) as {
+    id: string;
+    original_path: string;
+    review_status: string;
+    inclusion_decision: string | null;
+  }[];
+
+  const root: EvidenceTreeFolderNode = { type: "folder", name: "", children: [] };
+
+  for (const row of rows) {
+    const segments = row.original_path.split("/").filter(Boolean);
+    let current = root;
+    for (let i = 0; i < segments.length - 1; i++) {
+      const folderName = segments[i];
+      let next = current.children.find((c): c is EvidenceTreeFolderNode => c.type === "folder" && c.name === folderName);
+      if (!next) {
+        next = { type: "folder", name: folderName, children: [] };
+        current.children.push(next);
+      }
+      current = next;
+    }
+    const fileName = segments[segments.length - 1] ?? row.original_path;
+    current.children.push({
+      type: "file",
+      id: row.id,
+      name: fileName,
+      reviewStatus: row.review_status as EvidenceItemDetail["reviewStatus"],
+      inclusionDecision: row.inclusion_decision as InclusionDecision | null,
+    });
+  }
+
+  function sortTree(node: EvidenceTreeFolderNode): void {
+    node.children.sort((a, b) => {
+      if (a.type !== b.type) return a.type === "folder" ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    for (const child of node.children) {
+      if (child.type === "folder") sortTree(child);
+    }
+  }
+  sortTree(root);
+
+  return root.children;
+}
+
 export function getItemDetail(
   db: Database.Database,
   workspaceId: number,
@@ -161,7 +384,7 @@ export function getItemDetail(
   const row = db
     .prepare(`SELECT ${ITEM_COLUMNS} FROM evidence_items WHERE workspace_id = ? AND id = ?`)
     .get(workspaceId, itemId) as EvidenceItemRow | undefined;
-  return row ? mapRow(db, row) : null;
+  return row ? mapRow(db, workspaceId, row) : null;
 }
 
 export function getNextItem(

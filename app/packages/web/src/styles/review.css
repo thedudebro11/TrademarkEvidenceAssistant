@@ -1,5 +1,95 @@
 /* Review Studio layout (docs/ui/UI_INFORMATION_ARCHITECTURE.md Page 2). */
 
+.review-with-tree {
+  display: grid;
+  grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.review-tree-sidebar {
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  padding: 12px;
+}
+.review-tree-sidebar__toggle {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.reviewed-files__group {
+  margin-bottom: 14px;
+}
+.reviewed-files__group h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 650 13px/1.3 var(--font-sans);
+  margin: 0 0 4px;
+}
+.reviewed-files__group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.reviewed-files__group .evidence-tree__file {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+}
+.evidence-tree ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 14px;
+}
+.evidence-tree > ul {
+  padding-left: 0;
+}
+.evidence-tree__folder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 2px;
+  font: 650 13px/1.3 var(--font-sans);
+  text-align: left;
+}
+.evidence-tree__file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  border-radius: var(--radius-control);
+  text-align: left;
+  font: var(--text-metadata);
+}
+.evidence-tree__file:hover,
+.evidence-tree__file:focus-visible {
+  background: var(--surface-strong);
+}
+.evidence-tree__file--current {
+  background: var(--surface-strong);
+  border-left: 3px solid var(--color-selected);
+}
+.evidence-tree__filename {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1180px) {
+  .review-with-tree {
+    grid-template-columns: 1fr;
+  }
+  .review-tree-sidebar {
+    position: static;
+    max-height: 320px;
+  }
+}
+
 .review-layout {
   display: grid;
   grid-template-columns: minmax(0, 62fr) minmax(320px, 38fr);
@@ -67,6 +157,40 @@
   background: white;
 }
 
+.evidence-viewer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+}
+.evidence-viewer__stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+.evidence-viewer__ai-section {
+  width: 100%;
+  max-width: 640px;
+  font: var(--text-metadata);
+  color: var(--text-secondary);
+}
+.evidence-viewer__ai-section summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+.evidence-viewer__video-fallback {
+  text-align: center;
+  padding: 24px;
+}
+.evidence-viewer__video-fallback-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 12px;
+}
+
 .review-panel {
   display: flex;
   flex-direction: column;
@@ -90,6 +214,12 @@
   flex-wrap: wrap;
 }
 
+.decision-dock__status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .shortcuts-help {
   padding: 14px 16px;
 }
@@ -105,6 +235,495 @@
   border: 1px solid var(--border-neutral);
   border-radius: 6px;
   padding: 2px 6px;
+}
+
+/*
+ * Connections Workspace (docs/ADR_0003_CONNECTIONS_WORKSPACE_SCROLL_FIX.md).
+ * Replaces the old horizontal `scroll-snap` candidate strip — that
+ * pattern is the documented root cause of the "returns to the
+ * beginning" scrollbar bug: `scroll-snap-type: x proximity` combined
+ * with any reflow inside the strip (an `aria-selected` class change on
+ * a card, a list re-render) makes the browser recompute snap targets
+ * mid-session and re-settle on the nearest one, which in practice was
+ * item 0. A normal vertical grid with no scroll-snap has no such
+ * re-snap behavior at all.
+ */
+.connections-workspace {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: flex-end;
+}
+.connections-workspace__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(11, 24, 53, 0.45);
+}
+.connections-workspace__dialog {
+  position: relative;
+  width: 80vw;
+  /* Wide enough that a large monitor naturally fits a third card column
+     via the grid's auto-fit + minmax below — no extra breakpoint needed
+     for "2-3 columns on large monitors." */
+  max-width: 1560px;
+  min-width: 480px;
+  height: 100%;
+  background: var(--surface-strong);
+  /* Matches .glass-surface (glass.css) — without the blur, this
+     translucent background just dims the page behind it instead of
+     obscuring it, and at drawer width that page detail reads as a
+     distracting smear instead of a clean panel. */
+  backdrop-filter: blur(24px) saturate(120%);
+  -webkit-backdrop-filter: blur(24px) saturate(120%);
+  box-shadow: var(--shadow-floating);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.connections-workspace__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border-neutral);
+}
+.connections-workspace__current {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border-neutral);
+  background: var(--surface-subtle);
+}
+.connections-workspace__current-thumb {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-control);
+  overflow: hidden;
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-surface);
+}
+.connections-workspace__current-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.connections-workspace__current-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.connections-workspace__current-label {
+  font: 650 11px/1 var(--font-sans);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+.connections-workspace__current-filename {
+  font: 650 15px/1.3 var(--font-sans);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.connections-workspace__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border-neutral);
+}
+.connections-workspace__toolbar label {
+  font: var(--text-metadata);
+  color: var(--text-secondary);
+}
+.connections-workspace__size-control {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-subtle);
+}
+.connections-workspace__size-option {
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+  font: 600 12px/1 var(--font-sans);
+  color: var(--text-secondary);
+  transition: background var(--motion-micro) var(--ease-out), color var(--motion-micro) var(--ease-out);
+}
+.connections-workspace__size-option--active {
+  background: var(--surface-strong);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-surface);
+}
+.connections-workspace__body {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+.connections-workspace__grid {
+  /* Set inline per-render from the thumbnail-size control. */
+  --connections-card-min: 340px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 20px 24px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--connections-card-min), 1fr));
+  /* Second, independent height floor at the grid-row level (in addition
+     to .card-thumb's own explicit height) — with hundreds of rows (a
+     large, unfiltered candidate set), row auto-sizing must never be
+     allowed to collapse below a full card's height. */
+  grid-auto-rows: minmax(calc(var(--connections-card-min) * 0.75 + 96px), auto);
+  gap: 22px;
+  align-content: start;
+}
+.connections-workspace__empty {
+  grid-column: 1 / -1;
+  color: var(--text-secondary);
+}
+.connections-workspace__card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  border: 1px solid var(--border-neutral);
+  border-radius: var(--radius-card);
+  background: var(--surface-subtle);
+  overflow: hidden;
+  cursor: pointer;
+  box-shadow: var(--shadow-surface);
+  transition: transform var(--motion-standard) var(--ease-out), box-shadow var(--motion-standard) var(--ease-out), border-color var(--motion-standard) var(--ease-out);
+}
+.connections-workspace__card[aria-disabled="true"] {
+  cursor: default;
+}
+.connections-workspace__card:hover:not([aria-disabled="true"]),
+.connections-workspace__card:focus-visible {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-floating);
+}
+.connections-workspace__card--selected {
+  border-color: var(--color-selected);
+  border-width: 3px;
+  box-shadow: 0 0 0 4px rgba(35, 100, 232, 0.28), var(--shadow-floating);
+}
+.connections-workspace__card--linked {
+  opacity: 0.6;
+}
+.connections-workspace__card-thumb {
+  position: relative;
+  width: 100%;
+  /* Artwork dominates the card — roughly an 80/20 split against the
+     compact metadata block below, per the visual-recognition redesign.
+     `height` is computed directly from the same --connections-card-min
+     variable that sizes the grid column, rather than relying solely on
+     `aspect-ratio` to derive height from this element's own resolved
+     width. `.card-thumb` is a flex item inside a column-flex card,
+     which is itself a CSS Grid item — that's a percentage/aspect-ratio
+     resolution chain across nested flex-in-grid containers, and it was
+     collapsing to near-zero height in practice (every candidate card
+     rendered as a blank sliver with no visible thumbnail). `aspect-ratio`
+     is kept as a supplementary hint for browsers that resolve it
+     correctly; `height` is the guaranteed floor. */
+  height: calc(var(--connections-card-min, 340px) * 0.75);
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.connections-workspace__card-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.connections-workspace__card-fallback {
+  font: 650 18px/1 var(--font-sans);
+  color: var(--text-secondary);
+}
+.connections-workspace__card-check {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--color-selected);
+  color: #fff;
+  font: 700 16px/30px var(--font-sans);
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(11, 24, 53, 0.35);
+}
+.connections-workspace__card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px 14px;
+}
+.connections-workspace__card-filename {
+  font: 650 14px/1.3 var(--font-sans);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.connections-workspace__card-subline {
+  font: var(--text-metadata);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.connections-workspace__card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+.connections-workspace__card-ai-slot {
+  /* Reserved for future AI relationship badges — intentionally empty. */
+  min-height: 6px;
+}
+.connections-workspace__card-preview {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  opacity: 0;
+  transition: opacity var(--motion-micro) var(--ease-out);
+}
+.connections-workspace__card:hover .connections-workspace__card-preview,
+.connections-workspace__card:focus-within .connections-workspace__card-preview,
+.connections-workspace__card-preview:focus-visible {
+  opacity: 1;
+}
+.connections-workspace__selected-pane {
+  flex: 0 0 340px;
+  border-left: 1px solid var(--border-neutral);
+  overflow-y: auto;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.connections-workspace__selected-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border-neutral);
+}
+.connections-workspace__selected-row:first-of-type {
+  border-top: none;
+}
+.connections-workspace__preview-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.connections-workspace__preview-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(11, 24, 53, 0.55);
+}
+.connections-workspace__preview-panel {
+  position: relative;
+  width: min(90%, 900px);
+  max-height: 88%;
+  overflow: auto;
+  background: var(--surface-strong);
+  backdrop-filter: blur(24px) saturate(120%);
+  -webkit-backdrop-filter: blur(24px) saturate(120%);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-floating);
+  padding: 16px;
+}
+.connections-workspace__preview-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+@media (max-width: 900px) {
+  .connections-workspace__dialog {
+    width: 100vw;
+    min-width: 0;
+  }
+  .connections-workspace__body {
+    flex-direction: column;
+  }
+  .connections-workspace__grid {
+    /* Tablet: always 2 columns, regardless of the thumbnail-size
+       control — cards shrink to fit rather than the grid dropping to 1. */
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  .connections-workspace__selected-pane {
+    flex: 0 0 auto;
+    border-left: none;
+    border-top: 1px solid var(--border-neutral);
+    max-height: 40vh;
+  }
+}
+@media (max-width: 560px) {
+  .connections-workspace__grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Archive Similar (docs/ADR_0004_ARCHIVE_SIMILAR.md). */
+.archive-similar-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.archive-similar-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(11, 24, 53, 0.5);
+}
+.archive-similar-modal__dialog {
+  position: relative;
+  width: min(720px, 92vw);
+  max-height: 88vh;
+  overflow-y: auto;
+  background: var(--surface-strong);
+  backdrop-filter: blur(24px) saturate(120%);
+  -webkit-backdrop-filter: blur(24px) saturate(120%);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-floating);
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.archive-similar-modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.archive-similar-modal__subtitle {
+  margin: 4px 0 0;
+  font: var(--text-metadata);
+  color: var(--text-secondary);
+}
+.archive-similar-modal__body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.archive-similar-modal__summary dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 10px;
+  margin: 8px 0;
+}
+.archive-similar-modal__summary dt {
+  color: var(--text-secondary);
+  font: var(--text-metadata);
+}
+.archive-similar-modal__scope {
+  color: var(--text-secondary);
+}
+.archive-similar-modal__eligible-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.archive-similar-modal__eligible-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border-neutral);
+  border-radius: var(--radius-control);
+}
+.archive-similar-modal__eligible-list li {
+  border-bottom: 1px solid var(--border-neutral);
+}
+.archive-similar-modal__eligible-list li:last-child {
+  border-bottom: none;
+}
+.archive-similar-modal__eligible-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.archive-similar-modal__derived-date {
+  margin: 0 10px 8px;
+  color: var(--text-secondary);
+  font: var(--text-metadata);
+}
+.archive-similar-modal__date-confidence {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--border-neutral);
+  border-radius: var(--radius-control);
+  padding: 10px;
+}
+.archive-similar-modal__date-confidence-help {
+  color: var(--text-secondary);
+  font: var(--text-metadata);
+  margin: 0;
+}
+.archive-similar-modal__excluded {
+  border: 1px solid var(--border-neutral);
+  border-radius: var(--radius-control);
+  padding: 8px 10px;
+}
+.archive-similar-modal__archive-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.archive-similar-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.toast-region {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 80;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-floating);
+}
+.toast__message {
+  margin: 0;
+  flex: 1 1 auto;
 }
 
 @media (max-width: 1180px) {

@@ -15,6 +15,50 @@ interface CreateConnectionInput {
   confidence: SuggestionConfidence | null;
 }
 
+function normalizeSlashes(path: string): string {
+  return path.replace(/\\/g, "/").toLowerCase();
+}
+
+/**
+ * Resolves a typed or pasted path to an item, tolerating the most
+ * common real-world mistake: pasting a full OS path (e.g. copied from
+ * Windows Explorer) instead of the path-relative-to-the-evidence-root
+ * that's actually stored. Tries an exact match first (the fast, common
+ * case with the picker); if that fails, falls back to a case-insensitive
+ * suffix match — "does the typed path end with a stored item's path?" —
+ * which resolves an absolute path without needing to know the evidence
+ * root here. The evidence root itself is never modified or read from
+ * disk by this check; it only ever compares strings already in the DB.
+ *
+ * Known imprecision: raw suffix matching can't distinguish "this really
+ * is the evidence root + item path" from "this longer path coincidentally
+ * ends the same way" — e.g. two same-named files in different folders,
+ * paired with a typo'd path, could resolve to the wrong one. This isn't
+ * checked against the real evidence root because the connection creation
+ * path (the atomic draft save) doesn't currently carry it this deep; the
+ * picker UI is the precise, ambiguity-free way to link two items, and
+ * this fallback exists only to rescue manual typing/pasting from an
+ * outright failure.
+ */
+function resolveTargetItem(
+  db: Database.Database,
+  workspaceId: number,
+  targetPath: string,
+): { id: string } | undefined {
+  const exact = db
+    .prepare("SELECT id FROM evidence_items WHERE workspace_id = ? AND original_path = ?")
+    .get(workspaceId, targetPath) as { id: string } | undefined;
+  if (exact) return exact;
+
+  const normalizedTarget = normalizeSlashes(targetPath);
+  const candidates = db
+    .prepare("SELECT id, original_path FROM evidence_items WHERE workspace_id = ?")
+    .all(workspaceId) as { id: string; original_path: string }[];
+
+  const suffixMatch = candidates.find((c) => normalizedTarget.endsWith(normalizeSlashes(c.original_path)));
+  return suffixMatch ? { id: suffixMatch.id } : undefined;
+}
+
 /**
  * Creates a user-asserted connection from `sourceItemId` to an item
  * identified by its original path (paths, not opaque ids, are what a
@@ -46,11 +90,11 @@ export function createConnection(
     throw new ConnectionValidationError(`Evidence item ${sourceItemId} not found in this workspace`);
   }
 
-  const target = db
-    .prepare("SELECT id FROM evidence_items WHERE workspace_id = ? AND original_path = ?")
-    .get(workspaceId, targetOriginalPath) as { id: string } | undefined;
+  const target = resolveTargetItem(db, workspaceId, targetOriginalPath);
   if (!target) {
-    throw new ConnectionValidationError(`No evidence item found at path "${targetOriginalPath}"`);
+    throw new ConnectionValidationError(
+      `No evidence item matches "${targetOriginalPath}". Try picking it from the list instead of typing the path.`,
+    );
   }
   if (target.id === sourceItemId) {
     throw new ConnectionValidationError("An evidence item cannot be connected to itself");
@@ -63,8 +107,46 @@ export function createConnection(
     )
     .run(sourceItemId, target.id, input.type, input.explanation.trim(), input.confidence);
 
+  // "No Related Evidence" workflow: the two states must never coexist.
+  // A connection existing between these two items makes any prior
+  // "no related evidence" claim stale for *both* of them, not just the
+  // side whose Connect panel was used — this is the one authoritative
+  // write path for that invariant, regardless of what any draft payload
+  // claims (see reviewDraftService.saveDraft's own defensive check).
+  db.prepare("UPDATE evidence_items SET no_related_evidence = 0 WHERE id IN (?, ?)").run(sourceItemId, target.id);
+
   const row = db.prepare("SELECT * FROM connections WHERE id = ?").get(result.lastInsertRowid) as ConnectionRow;
   return mapConnectionRow(row);
+}
+
+/**
+ * Records (or clears) an explicit "no related evidence" determination
+ * for one item. Never creates a connection row — this is review
+ * metadata only. Setting `true` is silently ignored (not an error) if
+ * the item already has any connections, since that would violate the
+ * "must never coexist" invariant; the UI is designed so this shouldn't
+ * be reachable, but this is the authoritative guard regardless of the
+ * caller.
+ */
+export function setNoRelatedEvidence(db: Database.Database, workspaceId: number, itemId: string, value: boolean): void {
+  const existing = db
+    .prepare("SELECT id FROM evidence_items WHERE workspace_id = ? AND id = ?")
+    .get(workspaceId, itemId);
+  if (!existing) {
+    throw new ConnectionValidationError(`Evidence item ${itemId} not found in this workspace`);
+  }
+
+  if (!value) {
+    db.prepare("UPDATE evidence_items SET no_related_evidence = 0 WHERE id = ?").run(itemId);
+    return;
+  }
+
+  const count = db
+    .prepare("SELECT COUNT(*) AS c FROM connections WHERE source_item_id = ? OR target_item_id = ?")
+    .get(itemId, itemId) as { c: number };
+  if (count.c === 0) {
+    db.prepare("UPDATE evidence_items SET no_related_evidence = 1 WHERE id = ?").run(itemId);
+  }
 }
 
 /** Removes a connection. Throws if it doesn't belong to this workspace. */
