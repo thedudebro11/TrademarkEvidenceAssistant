@@ -109,6 +109,27 @@ describe("HomePage", () => {
     expect(screen.queryByText(/first.use/i)).toBeNull();
   });
 
+  it("regression: the main card's reviewed count and 'At a glance's Reviewed count always agree, even with needs-follow-up items present (real FATLETIC data: 216 total, 29 unreviewed, 30 reviewed, 1 needs-follow-up, 156 excluded)", async () => {
+    mockFetch({ total: 216, unreviewed: 29, reviewed: 30, needsFollowUp: 1, excluded: 156 });
+    renderHome();
+
+    // Both must read 186 (reviewed + excluded), never 187 (total -
+    // unreviewed) — a needs-follow-up item is not "reviewed".
+    await waitFor(() => expect(screen.getByText("186 of 216 reviewed")).toBeTruthy());
+    const atAGlanceReviewed = screen.getAllByText("186");
+    expect(atAGlanceReviewed.length).toBeGreaterThan(0); // the "At a glance" card's own "Reviewed" figure
+    expect(screen.queryByText("187")).toBeNull();
+  });
+
+  it("regression: 'Review complete' does not appear while a needs-follow-up item still needs attention, even with zero unreviewed items", async () => {
+    mockFetch({ total: 10, unreviewed: 0, reviewed: 9, needsFollowUp: 1, excluded: 0 });
+    renderHome();
+
+    await waitFor(() => expect(screen.getByText("Continue reviewing")).toBeTruthy());
+    expect(screen.queryByText("Review complete")).toBeNull();
+    expect(screen.queryByRole("link", { name: /Prepare Package/ })).toBeNull();
+  });
+
   it("shows the needs-follow-up count as informational text, not a broken link", async () => {
     mockFetch({ total: 10, unreviewed: 3, reviewed: 5, needsFollowUp: 2, excluded: 0 });
     renderHome();
@@ -170,5 +191,58 @@ describe("HomePage", () => {
 
     await waitFor(() => expect(screen.getByText(/1 missing evidence record removed\./)).toBeTruthy());
     await waitFor(() => expect(screen.queryByText("Review Missing Files")).toBeNull());
+  });
+
+  it("keeps the Batch Analysis card compact — Review Suggestions only opens as a full-width section below, launched by an explicit action, never inline in the sidebar", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+        if (url.includes("/evidence-items/progress")) return Promise.resolve({ ok: true, status: 200, json: async () => ({ total: 10, unreviewed: 3, reviewed: 5, needsFollowUp: 0, excluded: 2 }) });
+        if (url.includes("/missing-records/preview")) return Promise.resolve({ ok: true, status: 200, json: async () => EMPTY_MISSING_PREVIEW });
+        if (url.includes("/evidence-items/tree")) return Promise.resolve({ ok: true, status: 200, json: async () => [] });
+        if (url === "/api/analysis/batch" && init?.method === "POST") return Promise.resolve({ ok: true, status: 202, json: async () => ({ jobId: 1 }) });
+        if (url.match(/\/api\/analysis\/batch\/\d+$/)) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: 1,
+              status: "completed",
+              selectionMode: "all_unreviewed",
+              selectionParam: null,
+              totalCount: 3,
+              processedCount: 3,
+              succeededCount: 3,
+              failedCount: 0,
+              skippedCount: 0,
+              currentItemId: null,
+              currentFilename: null,
+              currentFolder: null,
+              createdAt: "x",
+              startedAt: "x",
+              finishedAt: "x",
+              cancellationRequested: false,
+              errorSummary: null,
+              deterministicRuleVersion: "1",
+              evidenceTypeRegistryVersion: "1.0",
+              providerAvailable: false,
+              readyForReview: true,
+            }),
+          });
+        }
+        if (url.includes("/analysis/suggestions-queue")) return Promise.resolve({ ok: true, status: 200, json: async () => ({ items: [], total: 0 }) });
+        return Promise.resolve({ ok: true, status: 200, json: async () => HEALTH });
+      }),
+    );
+    renderHome();
+
+    await waitFor(() => expect(screen.getByText("Batch Analysis")).toBeTruthy());
+    expect(screen.queryByLabelText("Review Suggestions workspace")).toBeNull(); // not shown until launched
+
+    fireEvent.click(screen.getByRole("button", { name: "Analyze All Unreviewed" }));
+    const launchButton = await screen.findByRole("button", { name: "Review 3 Suggestions" });
+    fireEvent.click(launchButton);
+
+    await waitFor(() => expect(screen.getByLabelText("Review Suggestions workspace")).toBeTruthy());
   });
 });

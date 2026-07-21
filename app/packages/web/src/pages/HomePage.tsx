@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { RemoveMissingRecordsResponse, ReviewProgress, ScanSummary } from "@trademark-evidence-assistant/shared";
+import { getReviewedCount, getRemainingCount } from "@trademark-evidence-assistant/shared";
 import { useAppState } from "../app/AppStateContext.js";
 import { Link } from "../app/router.js";
 import { fetchMissingRecordsPreview, fetchProgress, undoMissingRecordsRemoval } from "../api.js";
@@ -94,7 +95,10 @@ export function HomePage() {
 
   const evidenceRootExists = health.workspace.evidenceRootExists;
   const hasScanned = (progress?.total ?? 0) > 0;
-  const allDecided = hasScanned && progress!.unreviewed === 0;
+  // "Nothing left needing attention" — unreviewed *and* needs-follow-up
+  // both count as remaining, so "Review complete" never appears while an
+  // item is still explicitly flagged for a second look.
+  const allDecided = hasScanned && getRemainingCount(progress!) === 0;
 
   return (
     <>
@@ -134,12 +138,12 @@ export function HomePage() {
                 </p>
                 <div style={{ marginBottom: 20 }}>
                   <ProgressBar
-                    value={progress!.total - progress!.unreviewed}
+                    value={getReviewedCount(progress!)}
                     max={progress!.total}
                     label="Review progress"
                   />
                   <p style={{ marginTop: 8, color: "var(--text-secondary)", font: "var(--text-metadata)" }}>
-                    {progress!.total - progress!.unreviewed} of {progress!.total} reviewed
+                    {getReviewedCount(progress!)} of {progress!.total} reviewed
                   </p>
                 </div>
                 {allDecided ? (
@@ -166,7 +170,7 @@ export function HomePage() {
                   <dt style={{ font: "var(--text-metadata)", color: "var(--text-secondary)" }}>Total items</dt>
                   <dd style={{ font: "650 20px/1.2 var(--font-sans)" }}>{progress!.total}</dd>
                   <dt style={{ font: "var(--text-metadata)", color: "var(--text-secondary)" }}>Reviewed</dt>
-                  <dd style={{ font: "650 20px/1.2 var(--font-sans)" }}>{progress!.reviewed + progress!.excluded}</dd>
+                  <dd style={{ font: "650 20px/1.2 var(--font-sans)" }}>{getReviewedCount(progress!)}</dd>
                   <dt style={{ font: "var(--text-metadata)", color: "var(--text-secondary)" }}>Needs follow-up</dt>
                   <dd style={{ font: "650 20px/1.2 var(--font-sans)" }}>{progress!.needsFollowUp}</dd>
                   {lastScan && lastScan.duplicateGroups > 0 && (
@@ -227,15 +231,20 @@ export function HomePage() {
             {hasScanned && (
               <Card eyebrow="Evidence Intelligence" title="Batch Analysis">
                 <BatchAnalysisPanel onReadyForReview={(jobId) => setReviewQueueOpen({ jobId })} />
-                {reviewQueueOpen && (
-                  <div style={{ marginTop: 18 }}>
-                    <ReviewSuggestionsQueue jobId={reviewQueueOpen.jobId} onClose={() => setReviewQueueOpen(null)} />
-                  </div>
-                )}
               </Card>
             )}
           </div>
         </ContentGrid>
+      )}
+
+      {/* Full-width, not squeezed into the sidebar column above — a
+          practical workspace for dozens/hundreds of staged results,
+          opened explicitly via the "Review N Suggestions" action inside
+          the Batch Analysis card. */}
+      {reviewQueueOpen && (
+        <GlassPanel className="card" style={{ padding: "28px 32px", marginTop: 20 }} variant="strong">
+          <ReviewSuggestionsQueue jobId={reviewQueueOpen.jobId} onClose={() => setReviewQueueOpen(null)} />
+        </GlassPanel>
       )}
 
       <MissingRecordsModal open={missingModalOpen} onClose={() => setMissingModalOpen(false)} onRemoved={handleRecordsRemoved} />

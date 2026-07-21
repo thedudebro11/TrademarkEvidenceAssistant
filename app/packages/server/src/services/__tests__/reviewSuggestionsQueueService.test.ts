@@ -51,6 +51,15 @@ describe("reviewSuggestionsQueueService", () => {
     expect(queue.items.some((i) => i.evidenceItemId === "q1")).toBe(true);
   });
 
+  it("reports the file extension (for thumbnail rendering) and a real analyzedAt timestamp (for newest-analysis sorting)", async () => {
+    insertItem("q-meta", "Customer Photos/q-meta.jpg");
+    await startAnalysis(db, workspaceId, "q-meta", { evidenceRoot });
+    const queue = getSuggestionQueue(db, workspaceId, {});
+    const item = queue.items.find((i) => i.evidenceItemId === "q-meta")!;
+    expect(item.extension).toBe("jpg");
+    expect(item.analyzedAt).toBeTruthy();
+  });
+
   it("excludes an item with no actionable suggestions at all (nothing to review)", async () => {
     insertItem("q2", "Misc/q2.jpg"); // no strong folder/OCR signal at all → still gets a 'miscellaneous' type suggestion, which IS actionable
     extractTextFromItemMock.mockResolvedValueOnce(ocrExtraction(""));

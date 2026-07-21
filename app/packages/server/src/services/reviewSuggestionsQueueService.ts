@@ -20,7 +20,9 @@ interface CandidateRunRow {
   evidence_item_id: string;
   original_filename: string;
   original_path: string;
+  extension: string;
   provider_id: string | null;
+  completed_at: string | null;
 }
 
 function folderOf(originalPath: string): string {
@@ -33,7 +35,7 @@ export function getSuggestionQueue(db: Database.Database, workspaceId: number, f
   if (filters.jobId !== undefined) {
     candidateRows = db
       .prepare(
-        `SELECT ar.id AS run_id, ei.id AS evidence_item_id, ei.original_filename, ei.original_path, ar.provider_id
+        `SELECT ar.id AS run_id, ei.id AS evidence_item_id, ei.original_filename, ei.original_path, ei.extension, ar.provider_id, ar.completed_at
            FROM batch_analysis_job_items bji
            JOIN analysis_runs ar ON ar.id = bji.analysis_run_id
            JOIN evidence_items ei ON ei.id = bji.evidence_item_id
@@ -43,7 +45,7 @@ export function getSuggestionQueue(db: Database.Database, workspaceId: number, f
   } else {
     candidateRows = db
       .prepare(
-        `SELECT ar.id AS run_id, ei.id AS evidence_item_id, ei.original_filename, ei.original_path, ar.provider_id
+        `SELECT ar.id AS run_id, ei.id AS evidence_item_id, ei.original_filename, ei.original_path, ei.extension, ar.provider_id, ar.completed_at
            FROM analysis_runs ar
            JOIN evidence_items ei ON ei.id = ar.evidence_item_id
           WHERE ar.workspace_id = ? AND ar.superseded_at IS NULL
@@ -94,7 +96,9 @@ export function getSuggestionQueue(db: Database.Database, workspaceId: number, f
       evidenceItemId: row.evidence_item_id,
       filename: row.original_filename,
       folder: folderOf(row.original_path),
+      extension: row.extension,
       analysisRunId: row.run_id,
+      analyzedAt: row.completed_at ?? "",
       suggestedEvidenceType: topType?.proposed_value ?? null,
       alternativeEvidenceTypes: alternatives,
       confidence: (topType?.confidence as SuggestionConfidence | undefined) ?? null,

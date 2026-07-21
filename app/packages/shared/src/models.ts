@@ -435,6 +435,27 @@ export interface ReviewProgress {
 }
 
 /**
+ * The one definition of "reviewed" used everywhere in the UI — an item
+ * with a final decision that requires no further action from the user.
+ * Deliberately excludes `needsFollowUp` (explicitly flagged as still
+ * needing attention — showing it as "reviewed" would be actively
+ * misleading) and `in_review` (mid-progress, not final; folded into
+ * neither `reviewed` nor `unreviewed` by computeProgress.ts). Every UI
+ * surface that shows a "reviewed" count must call this function rather
+ * than recomputing it inline — two independent inline formulas
+ * (`total - unreviewed` vs `reviewed + excluded`) is exactly what
+ * produced HomePage's real "187 vs 186" discrepancy.
+ */
+export function getReviewedCount(progress: ReviewProgress): number {
+  return progress.reviewed + progress.excluded;
+}
+
+/** Items that still need the user's attention — unreviewed, or explicitly flagged needs-follow-up. The complement of `getReviewedCount`, so the two always sum to `progress.total`. */
+export function getRemainingCount(progress: ReviewProgress): number {
+  return progress.total - getReviewedCount(progress);
+}
+
+/**
  * The item-level Review Draft (see docs/ADR_0002_REVIEW_DRAFT_STATE.md).
  * A single atomic payload sent to `PUT /api/evidence-items/:id/draft`,
  * replacing the five separate per-field calls the panels used to make

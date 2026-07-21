@@ -225,6 +225,9 @@ export interface BatchAnalysisJobStatus {
   failedCount: number;
   skippedCount: number;
   currentItemId: string | null;
+  /** Resolved display fields for `currentItemId` — never show the raw UUID in the UI. Both null exactly when `currentItemId` is null. */
+  currentFilename: string | null;
+  currentFolder: string | null;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -264,7 +267,11 @@ export interface SuggestionQueueItemView {
   evidenceItemId: string;
   filename: string;
   folder: string;
+  /** For thumbnail rendering (image vs heic vs a file-type fallback) — never re-derived by guessing from the filename. */
+  extension: string;
   analysisRunId: number;
+  /** When this item's current analysis run completed — powers "newest analysis" sorting. */
+  analyzedAt: string;
   suggestedEvidenceType: string | null;
   alternativeEvidenceTypes: string[];
   confidence: SuggestionConfidence | null;

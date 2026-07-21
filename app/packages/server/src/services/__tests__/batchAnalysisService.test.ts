@@ -241,6 +241,32 @@ describe("batchAnalysisService", () => {
     const jobId = await startBatchAnalysis(db, workspaceId, paths, { selectionMode: "selected_ids", itemIds: ["c1"] }, 1);
     const job = await waitForBatchDone(db, workspaceId, jobId);
     expect(job.currentItemId).toBeNull();
+    expect(job.currentFilename).toBeNull();
+    expect(job.currentFolder).toBeNull();
+  });
+
+  it("resolves the currently-processing item to a real filename/folder while running — never exposes only the raw evidence-item UUID", async () => {
+    insertItem("current-1", "Customer Photos/current1.jpg");
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const { extractTextFromItem } = await import("../ocrService.js");
+    (extractTextFromItem as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      await gate;
+      return ocrExtraction();
+    });
+
+    const jobId = await startBatchAnalysis(db, workspaceId, paths, { selectionMode: "selected_ids", itemIds: ["current-1"] }, 1);
+    for (let i = 0; i < 100; i++) {
+      const job = getBatchAnalysisJobStatus(db, workspaceId, jobId)!;
+      if (job.currentItemId) {
+        expect(job.currentFilename).toBe("current1.jpg");
+        expect(job.currentFolder).toBe("Customer Photos");
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 2));
+    }
+    release();
+    await waitForBatchDone(db, workspaceId, jobId);
   });
 
   // --- duplicate-job prevention / abandoned-job reconciliation / cancellation ---

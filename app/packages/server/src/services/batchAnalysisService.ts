@@ -150,7 +150,7 @@ export function reconcileAbandonedBatchAnalysisJobs(db: Database.Database, works
   }
 }
 
-function mapJobRow(row: JobRow): BatchAnalysisJobStatus {
+function mapJobRow(row: JobRow, current: { filename: string; folder: string } | null): BatchAnalysisJobStatus {
   return {
     id: row.id,
     status: row.status as BatchAnalysisJobStatus["status"],
@@ -162,6 +162,8 @@ function mapJobRow(row: JobRow): BatchAnalysisJobStatus {
     failedCount: row.failed_count,
     skippedCount: row.skipped_count,
     currentItemId: row.current_item_id,
+    currentFilename: current?.filename ?? null,
+    currentFolder: current?.folder ?? null,
     createdAt: row.created_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
@@ -196,9 +198,19 @@ interface JobRow {
   provider_available: number;
 }
 
+/** Resolves `current_item_id` to a display-safe filename/folder — the UI must never show a raw evidence-item UUID as "what's currently being analyzed." `null` once the job finishes (current_item_id is cleared) or if the item has since been deleted. */
+function resolveCurrentItemDisplay(db: Database.Database, currentItemId: string | null): { filename: string; folder: string } | null {
+  if (!currentItemId) return null;
+  const row = db.prepare("SELECT original_filename, original_path FROM evidence_items WHERE id = ?").get(currentItemId) as { original_filename: string; original_path: string } | undefined;
+  if (!row) return null;
+  const folder = dirname(row.original_path);
+  return { filename: row.original_filename, folder: folder === "." ? "" : folder };
+}
+
 export function getBatchAnalysisJobStatus(db: Database.Database, workspaceId: number, jobId: number): BatchAnalysisJobStatus | null {
   const row = db.prepare("SELECT * FROM batch_analysis_jobs WHERE id = ? AND workspace_id = ?").get(jobId, workspaceId) as JobRow | undefined;
-  return row ? mapJobRow(row) : null;
+  if (!row) return null;
+  return mapJobRow(row, resolveCurrentItemDisplay(db, row.current_item_id));
 }
 
 /** Sets the cancellation flag a running job's loop checks between items — cancellation always takes effect between items, never mid-item (never partially processes one item). Returns `false` if the job doesn't exist or is already terminal. */
